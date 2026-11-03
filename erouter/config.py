@@ -1,9 +1,14 @@
 import copy
+import ipaddress
+import logging
 import os
+import re
 import secrets
 import threading
 
 import yaml
+
+log = logging.getLogger("erouter.config")
 
 CONFIG_PATH = os.environ.get("EROUTER_CONFIG", "/etc/erouter/config.yaml")
 _lock = threading.Lock()
@@ -34,6 +39,10 @@ DEFAULTS = {
     },
 }
 
+_IFACE = re.compile(r"^[A-Za-z0-9_.-]{1,15}$")
+_LEASE = re.compile(r"^\d{1,5}[smhd]?$")
+_COUNTRY = re.compile(r"^[A-Z]{2}$")
+
 
 def _merge(base, over):
     out = copy.deepcopy(base)
@@ -45,18 +54,91 @@ def _merge(base, over):
     return out
 
 
+def validate(cfg):
+    """Lève ValueError si la config est invalide.
+
+    Appelée par le web avant d'enregistrer, ET par l'agent (root) à chaque lecture :
+    le fichier est modifiable par le service web, il ne faut jamais lui faire confiance.
+    """
+    try:
+        _validate(cfg)
+    except (KeyError, TypeError, AttributeError) as e:
+        raise ValueError(f"Configuration invalide ({e})")
+
+
+def _validate(cfg):
+    lan, ap, up, web = cfg["lan"], cfg["ap"], cfg["uplink"], cfg["web"]
+
+    iface = ipaddress.IPv4Interface(lan["address"])
+    net = iface.network
+    if not 8 <= net.prefixlen <= 29 or iface.ip in (net.network_address, net.broadcast_address):
+        raise ValueError("Adresse LAN invalide")
+    start, end = ipaddress.IPv4Address(lan["dhcp_start"]), ipaddress.IPv4Address(lan["dhcp_end"])
+    if start not in net or end not in net or start > end:
+        raise ValueError("Plage DHCP incohérente avec le réseau LAN")
+    if not _LEASE.fullmatch(str(lan["lease"])):
+        raise ValueError("Durée de bail invalide (ex. 12h)")
+    dns = lan["dns"]
+    if not isinstance(dns, list) or not 1 <= len(dns) <= 4:
+        raise ValueError("DNS : 1 à 4 adresses")
+    for d in dns:
+        ipaddress.IPv4Address(d)
+    if lan["interface"] and not _IFACE.fullmatch(lan["interface"]):
+        raise ValueError("Nom d'interface LAN invalide")
+    if not _IFACE.fullmatch(up["interface"]):
+        raise ValueError("Nom d'interface uplink invalide")
+
+    ssid, pw = ap["ssid"], ap["password"]
+    if not isinstance(ssid, str) or not 1 <= len(ssid.encode()) <= 32 \
+            or any(ord(c) < 32 or ord(c) == 127 for c in ssid):
+        raise ValueError("SSID : 1 à 32 caractères")
+    if not isinstance(pw, str) or not 8 <= len(pw) <= 63 or not all(32 <= ord(c) < 127 for c in pw):
+        raise ValueError("Mot de passe Wi-Fi : 8 à 63 caractères ASCII")
+    if not isinstance(ap["country"], str) or not _COUNTRY.fullmatch(ap["country"]):
+        raise ValueError("Pays : code à 2 lettres majuscules (ex. FR)")
+    if not 1 <= int(ap["fallback_channel"]) <= 13:
+        raise ValueError("Canal de repli : 1 à 13")
+    if not 1 <= int(web["port"]) <= 65535:
+        raise ValueError("Port web invalide")
+
+
+def _read():
+    try:
+        with open(CONFIG_PATH) as f:
+            data = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    return _merge(DEFAULTS, data)
+
+
 def load():
+    """Lecture pour le service web (génère le secret de session au besoin)."""
     with _lock:
-        try:
-            with open(CONFIG_PATH) as f:
-                data = yaml.safe_load(f) or {}
-        except FileNotFoundError:
-            data = {}
-        cfg = _merge(DEFAULTS, data)
+        cfg = _read()
         if not cfg["web"]["secret"]:
             cfg["web"]["secret"] = secrets.token_hex(32)
             _write(cfg)
         return cfg
+
+
+_last_good = None
+
+
+def load_for_agent():
+    """Lecture pour l'agent root : ne modifie jamais le fichier, valide toujours,
+    et retombe sur la dernière config valide (ou les défauts) en cas de problème."""
+    global _last_good
+    with _lock:
+        try:
+            cfg = _read()
+            validate(cfg)
+            _last_good = cfg
+        except Exception as e:
+            log.error("config.yaml invalide, dernière config valide conservée : %s", e)
+            cfg = _last_good or copy.deepcopy(DEFAULTS)
+        return copy.deepcopy(cfg)
 
 
 def save(cfg):
@@ -65,9 +147,17 @@ def save(cfg):
 
 
 def _write(cfg):
-    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+    d = os.path.dirname(CONFIG_PATH)
+    os.makedirs(d, exist_ok=True)
     tmp = CONFIG_PATH + ".tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
+        f.flush()
+        os.fsync(f.fileno())          # la carte SD peut perdre le courant : on force l'écriture
     os.replace(tmp, CONFIG_PATH)
+    dfd = os.open(d, os.O_RDONLY)
+    try:
+        os.fsync(dfd)
+    finally:
+        os.close(dfd)

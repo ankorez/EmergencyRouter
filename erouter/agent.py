@@ -39,7 +39,7 @@ def request_apply():
 
 def _tick():
     global _pending, _offline_since, _last_reconnect, _base_applied
-    cfg = config.load()
+    cfg = config.load_for_agent()
     up_if = cfg["uplink"]["interface"]
 
     if not _base_applied:

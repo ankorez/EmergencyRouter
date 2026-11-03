@@ -119,10 +119,11 @@ def connect(iface, ssid, password=None, hidden=False):
         cmd += ["password", password]
     if hidden:
         cmd += ["hidden", "yes"]
+    existed = ssid in saved_networks()
     p = run(cmd, timeout=60)
     if p.returncode != 0:
-        # profil existant mais mot de passe erroné : on le supprime pour ne pas boucler
-        run(["nmcli", "connection", "delete", "id", ssid])
+        if not existed:   # on ne supprime que le profil qu'on vient de créer (mauvais mot de passe)
+            run(["nmcli", "connection", "delete", "id", ssid])
         raise RuntimeError((p.stderr or p.stdout).strip() or "Connexion impossible")
 
 

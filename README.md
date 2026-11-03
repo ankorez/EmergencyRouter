@@ -44,17 +44,29 @@ le vrai SSID/mot de passe et le Wi-Fi de la 5G. Change ces valeurs tout de suite
 
 ## Architecture
 
-| Fichier | Rôle |
-|---|---|
-| `erouter/agent.py` | boucle de fond : suit le canal, relance hostapd, surveille Internet |
-| `erouter/lan.py` | pont `br0`, `ap0`, hostapd, dnsmasq, nftables à partir de la config |
-| `erouter/web.py` + `static/index.html` | API Flask + interface web (sans dépendance externe, fonctionne hors-ligne) |
-| `systemd/` | services `erouter`, `erouter-hostapd`, `erouter-dnsmasq`, et réglage NetworkManager |
+Deux services, pour qu'une faille dans la page web ne donne pas root :
+
+| Service | Droits | Rôle |
+|---|---|---|
+| `erouter-agent` (`erouter/agent.py`, `agentd.py`, `lan.py`) | root | pont `br0`, `ap0`, hostapd, dnsmasq, nftables ; suit le canal de l'uplink ; surveille Internet |
+| `erouter-web` (`erouter/web.py`, `webd.py`, `static/index.html`) | utilisateur `erouter`, seul privilège : port 80 | API Flask + interface (sans dépendance externe, fonctionne hors-ligne) |
+| `erouter/rpc.py` | | socket local `/run/erouter/agent.sock` (0660 root:erouter) ; l'agent n'expose que quelques méthodes et valide chaque paramètre |
+
+L'agent **revalide toute la config à chaque lecture** (le fichier est modifiable par le service web) et garde la dernière config valide
+si le fichier est abîmé. Services supplémentaires : `erouter-hostapd`, `erouter-dnsmasq`.
 
 Config : `/etc/erouter/config.yaml` (voir `config.example.yaml`), modifiable depuis l'interface.
+Logs : `sudo journalctl -u erouter-agent -u erouter-web -u erouter-hostapd -u erouter-dnsmasq -n 80`
+
+## Protection de la carte SD
+
+Un routeur de secours dort longtemps puis subit une coupure de courant : on évite donc d'écrire.
+- Journaux **en RAM** (`Storage=volatile`), baux DHCP dans `/run` (RAM), `/tmp` en tmpfs (défaut de Debian 13), pas de swap ni de mises à jour automatiques.
+- La config est écrite de façon **atomique** (fichier temporaire + `fsync` + renommage).
+- Ce n'est **pas** un système de fichiers strictement en lecture seule : un overlay perdrait au redémarrage la config et le
+  Wi-Fi 5G enregistré depuis l'interface, sauf à ajouter une partition de données séparée (piste future).
 
 ## Feuille de route
 
-- [ ] Image flashable (pi-gen / rpi-image-gen) via GitHub Actions
-- [ ] Système de fichiers en lecture seule (résistance aux coupures)
-- [ ] Faire tourner le service sans root (capabilities)
+- [ ] Overlay en lecture seule avec partition de données séparée
+- [ ] Image construite automatiquement par GitHub Actions

@@ -1,12 +1,11 @@
 import functools
 import os
-import subprocess
 import time
 
 from flask import Flask, jsonify, request, send_from_directory, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from . import __version__, agent, config, lan, system
+from . import __version__, config, rpc
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 app = Flask(__name__, static_folder=None)
@@ -36,6 +35,11 @@ def auth(fn):
 
 def err(msg, code=400):
     return jsonify(error=str(msg)), code
+
+
+@app.errorhandler(OSError)
+def _agent_down(_):
+    return err("Agent injoignable (service erouter-agent arrêté ?)", 503)
 
 
 @app.get("/")
@@ -95,21 +99,18 @@ def change_password():
 @auth
 def status():
     cfg = _cfg()
-    s = agent.snapshot()
-    s["lan"] = {"address": cfg["lan"]["address"], "clients": len(system.clients(lan.LEASES))}
+    s = rpc.call("status")
+    s["lan"] = {"address": cfg["lan"]["address"], "clients": s.pop("clients")}
     s["ap"]["ssid"] = cfg["ap"]["ssid"]
-    s["uptime"] = system.uptime()
     return jsonify(s)
 
 
 @app.get("/api/wifi/scan")
 @auth
 def scan():
-    rescan = request.args.get("rescan") == "1"
-    iface = _cfg()["uplink"]["interface"]
     try:
-        return jsonify(networks=system.scan(iface, rescan), saved=system.saved_networks())
-    except Exception as e:
+        return jsonify(rpc.call("scan", rescan=request.args.get("rescan") == "1"))
+    except RuntimeError as e:
         return err(e, 500)
 
 
@@ -117,14 +118,11 @@ def scan():
 @auth
 def wifi_connect():
     d = request.get_json()
-    ssid = (d.get("ssid") or "").strip()
-    if not ssid:
-        return err("SSID manquant")
     try:
-        system.connect(_cfg()["uplink"]["interface"], ssid, d.get("password") or None, bool(d.get("hidden")))
-    except Exception as e:
+        rpc.call("connect", ssid=(d.get("ssid") or "").strip(), password=d.get("password") or None,
+                 hidden=bool(d.get("hidden")))
+    except RuntimeError as e:
         return err(e)
-    agent.wake.set()
     return jsonify(ok=True)
 
 
@@ -132,8 +130,8 @@ def wifi_connect():
 @auth
 def wifi_forget():
     try:
-        system.forget((request.get_json().get("ssid") or ""))
-    except Exception as e:
+        rpc.call("forget", ssid=(request.get_json().get("ssid") or ""))
+    except RuntimeError as e:
         return err(e)
     return jsonify(ok=True)
 
@@ -156,26 +154,28 @@ def set_settings():
             for k in ("enabled", "ssid", "password", "country", "fallback_channel"):
                 if k in d["ap"]:
                     cfg["ap"][k] = d["ap"][k]
+            cfg["ap"]["enabled"] = bool(cfg["ap"]["enabled"])
+            cfg["ap"]["fallback_channel"] = int(cfg["ap"]["fallback_channel"])
         if "lan" in d:
             for k in ("address", "dhcp_start", "dhcp_end", "lease", "dns"):
                 if k in d["lan"]:
                     cfg["lan"][k] = d["lan"][k]
-        lan.validate(cfg)
+        config.validate(cfg)
     except (ValueError, KeyError, TypeError) as e:
         return err(e)
     config.save(cfg)
-    agent.request_apply()
+    rpc.call("apply")
     return jsonify(ok=True)
 
 
 @app.get("/api/clients")
 @auth
 def clients():
-    return jsonify(clients=system.clients(lan.LEASES))
+    return jsonify(clients=rpc.call("clients"))
 
 
 @app.post("/api/reboot")
 @auth
 def reboot():
-    subprocess.Popen(["systemctl", "reboot"])
+    rpc.call("reboot")
     return jsonify(ok=True)

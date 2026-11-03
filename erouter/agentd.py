@@ -1,0 +1,70 @@
+"""Agent privilégié (root) : applique la config, suit le canal, exécute les actions demandées par le web."""
+import logging
+import subprocess
+import threading
+
+from . import agent, config, lan, rpc, system
+
+
+def _uplink():
+    return config.load_for_agent()["uplink"]["interface"]
+
+
+def _check_ssid(ssid):
+    if not isinstance(ssid, str) or not 1 <= len(ssid.encode()) <= 32 or "\x00" in ssid or ssid.startswith("-"):
+        raise ValueError("SSID invalide")
+
+
+def m_status():
+    s = agent.snapshot()
+    s["clients"] = len(system.clients(lan.LEASES))
+    s["uptime"] = system.uptime()
+    return s
+
+
+def m_scan(rescan=False):
+    return {"networks": system.scan(_uplink(), bool(rescan)), "saved": system.saved_networks()}
+
+
+def m_connect(ssid, password=None, hidden=False):
+    _check_ssid(ssid)
+    password = password or None
+    if password is not None and (not isinstance(password, str) or not 8 <= len(password) <= 63):
+        raise ValueError("Mot de passe Wi-Fi : 8 à 63 caractères")
+    system.connect(_uplink(), ssid, password, bool(hidden))
+    agent.wake.set()
+    return True
+
+
+def m_forget(ssid):
+    _check_ssid(ssid)
+    system.forget(ssid)
+    return True
+
+
+def m_clients():
+    return system.clients(lan.LEASES)
+
+
+def m_apply():
+    agent.request_apply()
+    return True
+
+
+def m_reboot():
+    subprocess.Popen(["systemctl", "reboot"])
+    return True
+
+
+METHODS = {"status": m_status, "scan": m_scan, "connect": m_connect, "forget": m_forget,
+           "clients": m_clients, "apply": m_apply, "reboot": m_reboot}
+
+
+def main():
+    logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s")
+    rpc.serve(METHODS)
+    agent.run_forever(threading.Event())
+
+
+if __name__ == "__main__":
+    main()

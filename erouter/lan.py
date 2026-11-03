@@ -7,7 +7,7 @@ from jinja2 import Environment, FileSystemLoader
 from . import system
 
 RUN_DIR = "/run/erouter"
-LEASES = "/var/lib/erouter/dnsmasq.leases"
+LEASES = "/run/erouter/dnsmasq.leases"   # en RAM : pas d'écriture sur la carte SD
 BRIDGE = "br0"
 AP_IF = "ap0"
 _env = Environment(loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "templates")),
@@ -23,25 +23,6 @@ def _write(name, content, mode=0o600):
     with os.fdopen(fd, "w") as f:
         f.write(content)
     return path
-
-
-def validate(cfg):
-    """Lève ValueError si la config est invalide (appelé avant d'enregistrer)."""
-    lan, ap = cfg["lan"], cfg["ap"]
-    iface = ipaddress.ip_interface(lan["address"])
-    net = iface.network
-    start, end = ipaddress.ip_address(lan["dhcp_start"]), ipaddress.ip_address(lan["dhcp_end"])
-    if start not in net or end not in net or start > end:
-        raise ValueError("Plage DHCP incohérente avec le réseau LAN")
-    if iface.ip in (net.network_address, net.broadcast_address):
-        raise ValueError("Adresse LAN invalide")
-    ssid, pw = ap["ssid"], ap["password"]
-    if not 1 <= len(ssid.encode()) <= 32 or "\n" in ssid:
-        raise ValueError("SSID : 1 à 32 caractères")
-    if not 8 <= len(pw) <= 63 or not all(32 <= ord(c) < 127 for c in pw):
-        raise ValueError("Mot de passe Wi-Fi : 8 à 63 caractères ASCII")
-    if not 1 <= int(ap["fallback_channel"]) <= 13:
-        raise ValueError("Canal de repli : 1 à 13")
 
 
 def apply_bridge(cfg):
@@ -73,7 +54,6 @@ def apply_dnsmasq(cfg):
         start=lan["dhcp_start"], end=lan["dhcp_end"], lease=lan["lease"],
         dns=lan["dns"], leases=LEASES)
     _write("dnsmasq.conf", conf, 0o644)
-    os.makedirs(os.path.dirname(LEASES), exist_ok=True)
     system.run(["systemctl", "restart", "erouter-dnsmasq"])
 
 
