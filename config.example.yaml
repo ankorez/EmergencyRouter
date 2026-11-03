@@ -14,4 +14,6 @@ ap:
 uplink:
   interface: wlan0             # Wi-Fi vers la 5G (se règle depuis l'interface web)
 web:
-  port: 80
+  port: 443                  # HTTPS (certificat auto-signé créé automatiquement)
+  http_port: 80                # redirige vers HTTPS (0 pour désactiver)
+  tls: true

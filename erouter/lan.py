@@ -57,9 +57,16 @@ def apply_dnsmasq(cfg):
     system.run(["systemctl", "restart", "erouter-dnsmasq"])
 
 
+def web_ports(cfg):
+    ports = [int(cfg["web"]["port"])]
+    if int(cfg["web"]["http_port"]):
+        ports.append(int(cfg["web"]["http_port"]))
+    return ports
+
+
 def apply_firewall(cfg):
     conf = _env.get_template("nftables.conf.j2").render(
-        bridge=BRIDGE, uplink=cfg["uplink"]["interface"], web_port=int(cfg["web"]["port"]),
+        bridge=BRIDGE, uplink=cfg["uplink"]["interface"], web_ports=web_ports(cfg),
         lan_net=str(ipaddress.ip_interface(cfg["lan"]["address"]).network))
     path = _write("nftables.conf", conf, 0o600)
     system.run(["nft", "-f", path], check=True)

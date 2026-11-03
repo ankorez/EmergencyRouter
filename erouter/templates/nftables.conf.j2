@@ -10,7 +10,7 @@ table inet erouter {
         icmp type echo-request limit rate 10/second accept
         # depuis le LAN uniquement : DHCP, DNS, mDNS, interface web ; SSH limité en débit
         iifname "{{ bridge }}" udp dport { 53, 67, 5353 } accept
-        iifname "{{ bridge }}" tcp dport { 53, {{ web_port }} } accept
+        iifname "{{ bridge }}" tcp dport { 53, {{ web_ports|join(', ') }} } accept
         iifname "{{ bridge }}" tcp dport 22 ct state new limit rate 12/minute burst 5 packets accept
     }
     chain forward {

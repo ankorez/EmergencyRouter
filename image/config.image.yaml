@@ -1,6 +1,6 @@
 # Config embarquée dans l'image flashable (premier démarrage).
 # Le hotspot « de configuration » sert uniquement à régler le routeur : change SSID et mot de passe
-# depuis l'interface web (http://192.168.1.1/ ou http://erouter.local/) dès le premier accès.
+# depuis l'interface web (https://192.168.1.1/ ou https://erouter.local/) dès le premier accès.
 lan:
   address: 192.168.1.1/24
   interface: eth0
@@ -17,4 +17,6 @@ ap:
 uplink:
   interface: wlan0
 web:
-  port: 80
+  port: 443                  # HTTPS (certificat auto-signé créé automatiquement)
+  http_port: 80                # redirige vers HTTPS (0 pour désactiver)
+  tls: true

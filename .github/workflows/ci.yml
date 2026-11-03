@@ -20,13 +20,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends python3-flask python3-yaml python3-jinja2 \
-            python3-waitress python3-pyflakes shellcheck dnsmasq-base nftables
+            python3-gunicorn python3-pyflakes shellcheck dnsmasq-base nftables openssl
       - name: Analyse statique Python
         run: python3 -m pyflakes erouter tests
       - name: Tests
         run: python3 -B -m unittest discover -s tests -v
       - name: shellcheck
-        run: shellcheck -e SC2154 install.sh build-image.sh image/stage-erouter/prerun.sh image/stage-erouter/00-install/00-run.sh scripts/erouter-fs
+        run: shellcheck -S warning -e SC2154 install.sh build-image.sh image/stage-erouter/prerun.sh image/stage-erouter/00-install/00-run.sh image/postprocess.sh scripts/erouter-fs scripts/erouter-data tests/integration/check.sh
       - name: Syntaxe dnsmasq
         run: |
           python3 - <<'PY'

@@ -1,7 +1,7 @@
 [Unit]
 Description=EmergencyRouter interface web (sans privilèges)
-After=erouter-agent.service
-Wants=erouter-agent.service
+After=erouter-data.service erouter-agent.service
+Wants=erouter-data.service erouter-agent.service
 
 [Service]
 Type=simple

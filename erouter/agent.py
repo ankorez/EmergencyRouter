@@ -4,7 +4,7 @@ import logging
 import threading
 import time
 
-from . import config, fs, lan, system
+from . import config, fs, lan, system, tls
 
 log = logging.getLogger("erouter.agent")
 
@@ -15,7 +15,8 @@ state = {
                "ip": "", "internet": False},
     "ap": {"enabled": False, "channel": 0, "active": False},
     "warnings": [],
-    "fs": {"enabled": False, "locked": False, "rescue": False},
+    "fs": {"available": False, "enabled": False, "locked": False, "rescue": False, "data": "none"},
+    "tls": {"enabled": False, "ready": False, "fingerprint": ""},
 }
 
 TICK = 5
@@ -28,6 +29,7 @@ _last_reconnect = 0.0
 _applied_base = None           # (lan, uplink, port web) réellement appliqué
 _base_failed_at = 0.0
 BASE_RETRY = 30                # s entre deux essais si l'application de la config échoue
+_tls_failed_at = 0.0
 
 
 def snapshot():
@@ -42,7 +44,7 @@ def request_apply():
 def _apply_base_if_changed(cfg):
     """Pont, DHCP/DNS et pare-feu : uniquement si leur config a changé (évite de couper les clients)."""
     global _applied_base, _base_failed_at
-    key = (copy.deepcopy(cfg["lan"]), cfg["uplink"]["interface"], cfg["web"]["port"])
+    key = (copy.deepcopy(cfg["lan"]), cfg["uplink"]["interface"], lan.web_ports(cfg))
     if key == _applied_base or time.monotonic() - _base_failed_at < BASE_RETRY:
         return
     try:
@@ -52,6 +54,19 @@ def _apply_base_if_changed(cfg):
         log.exception("application de la config réseau impossible, nouvel essai dans %ds", BASE_RETRY)
         return
     _applied_base = key
+
+
+def _maintain_tls(cfg):
+    """Certificat HTTPS : créé au premier démarrage, renouvelé avant échéance ou si l'IP du routeur change."""
+    global _tls_failed_at
+    if not cfg["web"]["tls"] or time.monotonic() - _tls_failed_at < 60:
+        return
+    try:
+        if tls.ensure(cfg["lan"]["address"]):
+            system.run(["systemctl", "try-restart", "--no-block", "erouter-web"])   # recharge le certificat
+    except Exception:
+        _tls_failed_at = time.monotonic()
+        log.exception("impossible de créer le certificat HTTPS (l'interface restera en HTTP)")
 
 
 def _desired_channel(cfg, link):
@@ -94,6 +109,7 @@ def _watchdog(up_if, link, internet):
 def _tick():
     cfg = config.load_for_agent()
     up_if = cfg["uplink"]["interface"]
+    _maintain_tls(cfg)
     _apply_base_if_changed(cfg)
 
     link = system.wifi_link(up_if)
@@ -112,6 +128,15 @@ def _tick():
     if link["connected"] and system.is_dfs(link["freq"]):
         warnings.append("L'uplink est sur un canal DFS : le hotspot risque de ne pas démarrer.")
 
+    fs_state = fs.status()
+    if fs_state["data"] == "reset":
+        warnings.append("La partition de données était abîmée (coupure de courant ?) : elle a été recréée. "
+                        "Ta configuration a été remise aux valeurs par défaut : refais les réglages.")
+    elif fs_state["data"] == "repaired":
+        warnings.append("La partition de données a été réparée automatiquement au démarrage.")
+    if cfg["web"]["tls"] and not tls.ready():
+        warnings.append("HTTPS indisponible (certificat non créé) : l'interface est servie en HTTP.")
+
     with _lock:
         state["uplink"] = {
             "connected": link["connected"], "ssid": link["ssid"], "channel": link["channel"],
@@ -120,7 +145,8 @@ def _tick():
         }
         state["ap"] = {"enabled": bool(cfg["ap"]["enabled"]), "channel": desired, "active": ap_active}
         state["warnings"] = warnings
-        state["fs"] = fs.status()
+        state["fs"] = fs_state
+        state["tls"] = tls.status(cfg["web"]["tls"])
 
 
 def run_forever(stop):

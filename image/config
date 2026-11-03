@@ -10,5 +10,4 @@ WPA_COUNTRY=FR
 ENABLE_SSH=1
 # Raspberry Pi OS Lite (stages 0 à 2) + notre étape
 STAGE_LIST="stage0 stage1 stage2 stage-erouter"
-DEPLOY_COMPRESSION=xz
-COMPRESSION_LEVEL=6
+DEPLOY_COMPRESSION=none

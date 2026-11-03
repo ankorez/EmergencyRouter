@@ -1,14 +1,15 @@
-"""Racine du système en lecture seule, avec de brèves fenêtres d'écriture.
+"""Racine du système en lecture seule, avec une partition de données séparée.
 
-Principe : une fois le démarrage terminé, l'agent remonte `/` en lecture seule. Seul l'agent (root) peut la
-repasser en écriture, quelques secondes, pour enregistrer la config ou un Wi-Fi, puis la reverrouille.
-On peut donc couper le courant à tout moment (sauf pendant ces quelques secondes) sans abîmer la carte SD.
+Principe : tout ce qui doit survivre (config, Wi-Fi enregistrés, certificat) vit dans /data, une petite partition
+séparée (« erdata »). Une fois le démarrage terminé, l'agent remonte `/` en lecture seule : le système n'est plus
+jamais écrit. Une coupure de courant ne peut abîmer que /data, qui est vérifiée, réparée ou recréée à chaque
+démarrage (scripts/erouter-data) sans jamais empêcher le démarrage.
 
+Le verrouillage n'existe que si /data est une vraie partition séparée (image EmergencyRouter).
 Sortie de secours : ajouter `erouter.unlock` à la fin de cmdline.txt (partition de boot, lisible depuis un Mac).
 
-Utilisation en ligne de commande :  sudo erouter-fs status | lock | unlock
+Ligne de commande :  sudo erouter-fs status | lock | unlock
 """
-import contextlib
 import logging
 import os
 import sys
@@ -19,10 +20,10 @@ from . import system
 
 log = logging.getLogger("erouter.fs")
 
-FLAG = os.environ.get("EROUTER_LOCK_FLAG", "/var/lib/erouter/lock-enabled")
+DATA = os.environ.get("EROUTER_DATA", "/data")
+DISABLED = os.path.join(DATA, "erouter", "lock-disabled")     # présent => verrouillage désactivé par l'utilisateur
+DATA_STATE = os.environ.get("EROUTER_DATA_STATE", "/run/erouter-data.state")
 _lock = threading.RLock()
-_depth = 0
-_need_relock = False
 _last_try = 0.0
 
 
@@ -48,12 +49,26 @@ def rescue():
         return False
 
 
+def has_data_partition():
+    return os.path.ismount(DATA)
+
+
+def data_state():
+    """ok | repaired | reset | none : résultat de la vérification de /data au démarrage."""
+    try:
+        with open(DATA_STATE) as f:
+            return f.read().strip() or "none"
+    except OSError:
+        return "none"
+
+
 def enabled():
-    return os.path.exists(FLAG)
+    return has_data_partition() and not os.path.exists(DISABLED)
 
 
 def status():
-    return {"enabled": enabled(), "locked": root_ro(), "rescue": rescue()}
+    return {"available": has_data_partition(), "enabled": enabled(), "locked": root_ro(),
+            "rescue": rescue(), "data": data_state()}
 
 
 def _remount(mode):
@@ -63,34 +78,11 @@ def _remount(mode):
 def _try_lock(retries=5):
     """Repasse `/` en lecture seule (peut échouer tant qu'un fichier est ouvert en écriture)."""
     system.run(["sync"])
-    for i in range(retries):
+    for _ in range(retries):
         if _remount("ro"):
             return True
         time.sleep(1)
     return False
-
-
-@contextlib.contextmanager
-def writable(linger=0):
-    """Fenêtre d'écriture : `/` est en écriture dans le bloc, puis reverrouillée (sans effet si non verrouillée)."""
-    global _depth, _need_relock
-    with _lock:
-        if root_ro():
-            if not _remount("rw"):
-                raise RuntimeError("Impossible de passer la carte en écriture")
-            _need_relock = True
-        _depth += 1
-    try:
-        yield
-    finally:
-        if linger:
-            time.sleep(linger)   # laisse NetworkManager finir d'écrire son profil
-        with _lock:
-            _depth -= 1
-            if _depth == 0 and _need_relock:
-                _need_relock = False
-                if not _try_lock():
-                    log.warning("Impossible de reverrouiller la carte pour l'instant, nouvel essai plus tard")
 
 
 def maintain():
@@ -99,8 +91,6 @@ def maintain():
     if not enabled() or rescue() or root_ro():
         return
     with _lock:
-        if _depth:
-            return
         if time.time() - _last_try < 30:
             return
         _last_try = time.time()
@@ -108,43 +98,48 @@ def maintain():
         if state not in ("running", "degraded"):   # démarrage pas fini : on attend
             return
         if _try_lock(2):
-            log.info("Carte SD verrouillée (lecture seule)")
+            log.info("Système verrouillé (lecture seule)")
         else:
             log.warning("Verrouillage impossible pour l'instant (fichier ouvert en écriture)")
 
 
 def set_enabled(on):
-    """Active/désactive le verrouillage de façon durable."""
+    """Active/désactive le verrouillage de façon durable (le choix est mémorisé dans /data)."""
+    if on and not has_data_partition():
+        raise RuntimeError("Protection indisponible : il faut la partition de données (image EmergencyRouter)")
     with _lock:
-        if root_ro() and not _remount("rw"):
-            raise RuntimeError("Impossible de passer la carte en écriture")
         if on:
-            os.makedirs(os.path.dirname(FLAG), exist_ok=True)
-            with open(FLAG, "w") as f:
-                f.flush()
-                os.fsync(f.fileno())
-        else:
             try:
-                os.remove(FLAG)
+                os.remove(DISABLED)
             except FileNotFoundError:
                 pass
-        system.run(["sync"])
-        if on and not rescue():
-            _try_lock(3)
+            if not rescue():
+                _try_lock(3)
+        else:
+            os.makedirs(os.path.dirname(DISABLED), exist_ok=True)
+            with open(DISABLED, "w") as f:
+                f.flush()
+                os.fsync(f.fileno())
+            if root_ro() and not _remount("rw"):
+                raise RuntimeError("Impossible de passer le système en écriture")
 
 
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else "status"
-    if cmd == "lock":
-        set_enabled(True)
-    elif cmd == "unlock":
-        set_enabled(False)
-    elif cmd != "status":
-        print("usage : erouter-fs status|lock|unlock", file=sys.stderr)
-        return 2
+    try:
+        if cmd == "lock":
+            set_enabled(True)
+        elif cmd == "unlock":
+            set_enabled(False)
+        elif cmd != "status":
+            print("usage : erouter-fs status|lock|unlock", file=sys.stderr)
+            return 2
+    except RuntimeError as e:
+        print(e, file=sys.stderr)
+        return 1
     s = status()
-    print(f"verrouillage activé : {s['enabled']} | racine en lecture seule : {s['locked']}"
-          + (" | mode secours (erouter.unlock)" if s["rescue"] else ""))
+    print(f"partition de données : {s['available']} (état : {s['data']}) | verrouillage activé : {s['enabled']}"
+          f" | racine en lecture seule : {s['locked']}" + (" | mode secours (erouter.unlock)" if s["rescue"] else ""))
     return 0
 
 

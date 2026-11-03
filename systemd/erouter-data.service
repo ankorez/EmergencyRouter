@@ -1,0 +1,15 @@
+[Unit]
+Description=EmergencyRouter : partition de données (vérifiée, réparée ou recréée au besoin)
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target NetworkManager.service erouter-agent.service erouter-web.service
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/erouter-data
+TimeoutStartSec=180
+
+[Install]
+WantedBy=sysinit.target

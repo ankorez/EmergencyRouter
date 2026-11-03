@@ -1,6 +1,6 @@
 """Agent privilégié (root) : applique la config, suit le canal, exécute les actions demandées par le web.
 
-C'est le SEUL processus qui écrit sur la carte SD (via fs.writable) ; le service web est en lecture seule
+C'est le SEUL processus qui écrit la configuration (dans /data) ; le service web est en lecture seule
 et ne peut demander que les méthodes de METHODS, dont chacune valide ses paramètres.
 """
 import logging
@@ -10,7 +10,6 @@ import threading
 from . import agent, config, fs, lan, rpc, system
 
 log = logging.getLogger("erouter.agentd")
-WIFI_PROFILE_LINGER = 4   # s : laisse NetworkManager finir d'écrire le profil avant de reverrouiller la carte
 
 
 def _uplink():
@@ -20,11 +19,6 @@ def _uplink():
 def _check_ssid(ssid):
     if not isinstance(ssid, str) or not 1 <= len(ssid.encode()) <= 32 or "\x00" in ssid or ssid.startswith("-"):
         raise ValueError("SSID invalide")
-
-
-def _persist(cfg):
-    with fs.writable():
-        config.save(cfg)
 
 
 def m_status():
@@ -43,16 +37,14 @@ def m_connect(ssid, password=None, hidden=False):
     password = password or None
     if password is not None and (not isinstance(password, str) or not 8 <= len(password) <= 63):
         raise ValueError("Mot de passe Wi-Fi : 8 à 63 caractères")
-    with fs.writable(linger=WIFI_PROFILE_LINGER):    # NetworkManager enregistre le profil dans /etc
-        system.connect(_uplink(), ssid, password, bool(hidden))
+    system.connect(_uplink(), ssid, password, bool(hidden))   # le profil est enregistré dans /data
     agent.wake.set()
     return True
 
 
 def m_forget(ssid):
     _check_ssid(ssid)
-    with fs.writable(linger=WIFI_PROFILE_LINGER):
-        system.forget(ssid)
+    system.forget(ssid)
     return True
 
 
@@ -64,7 +56,7 @@ def m_save_config(cfg):
     """Enregistre une config proposée par le web, après nettoyage et validation complète."""
     new = config.sanitize(cfg)
     config.validate(new)
-    _persist(new)
+    config.save(new)
     agent.request_apply()
     return True
 
@@ -88,7 +80,7 @@ def _ensure_secret():
     cfg = config.load()
     if not cfg["web"]["secret"]:
         cfg["web"]["secret"] = config.new_secret()
-        _persist(config.sanitize(cfg))
+        config.save(config.sanitize(cfg))
 
 
 def main():

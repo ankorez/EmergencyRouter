@@ -46,27 +46,43 @@ $("#loginForm").onsubmit = async e => {
 };
 $("#logoutBtn").onclick = async () => { await api("/api/logout", {}); boot(); };
 
+const DATA_STATE = {ok: "Partition de données saine.", repaired: "Partition de données réparée automatiquement au démarrage.",
+  reset: "Partition de données recréée au démarrage : configuration remise à zéro.", none: ""};
+
 function renderFs(f) {
   fsState = f;
   const dot = $("#fsDot"), btn = $("#fsBtn");
+  $("#fsData").textContent = f.available ? (DATA_STATE[f.data] ?? "") : "";
+  if (!f.available) {
+    dot.className = "dot warn"; $("#fsTitle").textContent = "Non disponible";
+    $("#fsSub").textContent = "Pas de partition de données";
+    $("#fsHelp").textContent = "La protection de la carte (système en lecture seule) demande l'image EmergencyRouter, qui a une partition de données séparée.";
+    btn.hidden = true;
+    return;
+  }
   btn.hidden = false;
   if (f.locked) {
     dot.className = "dot ok"; $("#fsTitle").textContent = "Protégée";
-    $("#fsSub").textContent = "Lecture seule";
-    $("#fsHelp").textContent = "Tu peux couper le courant sans risque : la carte n'est écrite que quelques secondes quand tu enregistres un réglage.";
+    $("#fsSub").textContent = "Système en lecture seule";
+    $("#fsHelp").textContent = "Tu peux couper le courant sans risque : le système n'est plus jamais écrit, seule la petite partition de données l'est quand tu enregistres un réglage.";
     btn.textContent = "Désactiver la protection";
   } else if (f.enabled) {
     dot.className = "dot warn"; $("#fsTitle").textContent = f.rescue ? "Mode secours" : "En attente";
     $("#fsSub").textContent = f.rescue ? "Verrouillage ignoré (erouter.unlock)" : "Verrouillage en cours";
     $("#fsHelp").textContent = f.rescue ? "Retire « erouter.unlock » de cmdline.txt pour réactiver la protection."
-      : "La carte sera passée en lecture seule dès que le démarrage est terminé.";
+      : "Le système passera en lecture seule dès que le démarrage est terminé.";
     btn.textContent = "Désactiver la protection";
   } else {
     dot.className = "dot bad"; $("#fsTitle").textContent = "Non protégée";
     $("#fsSub").textContent = "Lecture-écriture";
-    $("#fsHelp").textContent = "Une coupure de courant peut abîmer la carte SD. Active la protection quand la configuration est terminée.";
+    $("#fsHelp").textContent = "Le système peut être abîmé par une coupure de courant. Active la protection quand la configuration est terminée.";
     btn.textContent = "Activer la protection";
   }
+}
+function renderTls(t) {
+  const el = $("#tlsInfo");
+  el.hidden = !(t && t.ready);
+  el.textContent = t && t.ready ? "Certificat HTTPS auto-signé · empreinte SHA-256 : " + t.fingerprint : "";
 }
 $("#fsBtn").onclick = async () => {
   const enable = !fsState.enabled;
@@ -90,6 +106,7 @@ async function refresh() {
   $("#apKv").innerHTML = kv([["Canal", a.channel], ["Routeur", s.lan.address], ["Appareils", s.lan.clients], ["Uptime", fmtUp(s.uptime)]]);
   const w = $("#warnings"); w.hidden = !s.warnings.length; w.innerHTML = s.warnings.map(esc).join("<br>");
   renderFs(s.fs);
+  renderTls(s.tls);
   const c = await api("/api/clients");
   $("#clients").innerHTML = c.clients.map(x => `<tr><td>${esc(x.hostname || "—")}</td><td>${esc(x.ip)}</td><td>${esc(x.mac)}</td>` +
     `<td><span class="tag">${x.wifi ? "Wi-Fi" : "Ethernet"}</span></td></tr>`).join("")

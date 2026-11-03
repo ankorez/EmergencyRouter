@@ -11,7 +11,8 @@ import yaml
 
 log = logging.getLogger("erouter.config")
 
-CONFIG_PATH = os.environ.get("EROUTER_CONFIG", "/etc/erouter/config.yaml")
+DATA_DIR = os.environ.get("EROUTER_DATA", "/data")         # partition de données (ou simple dossier)
+CONFIG_PATH = os.environ.get("EROUTER_CONFIG", os.path.join(DATA_DIR, "erouter", "config.yaml"))
 _lock = threading.Lock()
 
 DEFAULTS = {
@@ -34,7 +35,9 @@ DEFAULTS = {
         "interface": "wlan0",
     },
     "web": {
-        "port": 80,
+        "port": 443,                   # HTTPS
+        "http_port": 80,               # redirige vers HTTPS (0 = désactivé)
+        "tls": True,                   # HTTPS avec certificat auto-signé
         "password_hash": "",           # vide => écran de premier démarrage
         "secret": "",
     },
@@ -99,8 +102,14 @@ def _validate(cfg):
         raise ValueError("Pays : code à 2 lettres majuscules (ex. FR)")
     if not 1 <= int(ap["fallback_channel"]) <= 13:
         raise ValueError("Canal de repli : 1 à 13")
-    if not 1 <= int(web["port"]) <= 65535 or int(web["port"]) in (22, 53, 67, 5353):
+    port, http_port = int(web["port"]), int(web["http_port"])
+    reserved = (22, 53, 67, 5353)
+    if not 1 <= port <= 65535 or port in reserved:
         raise ValueError("Port web invalide")
+    if http_port and (not 1 <= http_port <= 65535 or http_port in reserved or http_port == port):
+        raise ValueError("Port HTTP de redirection invalide")
+    if not isinstance(web["tls"], bool):
+        raise ValueError("Option HTTPS invalide")
     if not isinstance(web["password_hash"], str) or not isinstance(web["secret"], str) \
             or len(web["password_hash"]) > 300 or len(web["secret"]) > 200:
         raise ValueError("Champs web invalides")

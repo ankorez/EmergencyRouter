@@ -10,6 +10,9 @@ BRANCH="${PIGEN_BRANCH:-arm64}"                         # branche 64 bits de pi-
 # Version de pi-gen épinglée (reproductible, pas de code inconnu téléchargé) : changer volontairement pour mettre à jour.
 PIGEN_REF="${PIGEN_REF:-c851f00178c64b87a86c06c2be216bd89d62e55b}"
 
+# Image Debian utilisée pour le post-traitement (épinglée par empreinte)
+DEBIAN_IMAGE="${DEBIAN_IMAGE:-debian:trixie@sha256:2dc419c6d7fe3dad0a2f9fd469c34cc90b0f9ba642d8fde837fe3d7d34a0e7f1}"
+
 command -v docker >/dev/null || { echo "Docker est requis." >&2; exit 1; }
 docker info >/dev/null 2>&1 || { echo "Le démon Docker ne répond pas." >&2; exit 1; }
 
@@ -38,9 +41,23 @@ touch "$PIGEN/stage2/SKIP_IMAGES"
 cp "$ROOT/image/config" "$PIGEN/config"
 
 cd "$PIGEN"
+rm -f deploy/*.img deploy/*.img.xz            # pas de confusion avec un build précédent
 ./build-docker.sh
 
+IMG="$(ls -t deploy/*.img | head -1)"
+NAME="$(basename "$IMG")"
+
+echo "==> Post-traitement : partition de données et retrait de « resize »"
+docker run --rm -v "$ROOT/image":/image:ro -v "$PIGEN/deploy":/deploy "$DEBIAN_IMAGE" sh -euc '
+  apt-get update -qq >/dev/null
+  apt-get install -y -qq --no-install-recommends fdisk e2fsprogs mtools >/dev/null
+  sh /image/postprocess.sh "/deploy/$1"' sh "$NAME"
+
+echo "==> Compression"
+xz -T0 -6 -f -k "$IMG"
+
 mkdir -p "$ROOT/dist"
-cp -v deploy/*.img.xz "$ROOT/dist/"
-(cd "$ROOT/dist" && shasum -a 256 -- *.img.xz | tee SHA256SUMS)
+rm -f "$ROOT"/dist/*.img.xz "$ROOT/dist/SHA256SUMS"
+cp -v "$IMG.xz" "$ROOT/dist/"
+(cd "$ROOT/dist" && shasum -a 256 -- "$NAME.xz" | tee SHA256SUMS)
 echo "Image prête dans $ROOT/dist/ (empreinte SHA-256 dans dist/SHA256SUMS)"

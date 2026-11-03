@@ -3,21 +3,25 @@
 Aucun accès au système réel : l'agent est simulé (sauf la validation/enregistrement de config, qui est réel).
 """
 import copy
+import http.client
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
 from unittest import mock
 
 _TMP = tempfile.mkdtemp(prefix="erouter-test-")
-os.environ["EROUTER_CONFIG"] = os.path.join(_TMP, "config.yaml")
-os.environ["EROUTER_LOCK_FLAG"] = os.path.join(_TMP, "lock-enabled")
+os.environ["EROUTER_DATA"] = os.path.join(_TMP, "data")
+os.environ["EROUTER_CONFIG"] = os.path.join(_TMP, "data", "erouter", "config.yaml")
+os.environ["EROUTER_DATA_STATE"] = os.path.join(_TMP, "data.state")
+os.environ["EROUTER_TLS_DIR"] = os.path.join(_TMP, "tls")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from jinja2 import Environment, FileSystemLoader  # noqa: E402
 
-from erouter import agent, agentd, config, fs, lan, rpc, system, web  # noqa: E402
+from erouter import agent, agentd, config, fs, lan, rpc, system, tls, web, webd  # noqa: E402
 
 TEMPLATES = os.path.join(os.path.dirname(__file__), "..", "erouter", "templates")
 
@@ -45,6 +49,9 @@ class ConfigTests(unittest.TestCase):
             "dhcp hors réseau": lambda c: c["lan"].__setitem__("dhcp_start", "10.9.9.9"),
             "canal": lambda c: c["ap"].__setitem__("fallback_channel", 40),
             "port SSH": lambda c: c["web"].__setitem__("port", 22),
+            "ports identiques": lambda c: c["web"].__setitem__("http_port", 443),
+            "port de redirection réservé": lambda c: c["web"].__setitem__("http_port", 53),
+            "tls non booléen": lambda c: c["web"].__setitem__("tls", "oui"),
             "section absente": lambda c: c.pop("lan"),
         }
         for name, mutate in cases.items():
@@ -83,12 +90,13 @@ class TemplateTests(unittest.TestCase):
     env = Environment(loader=FileSystemLoader(TEMPLATES))
 
     def test_nftables(self):
-        out = self.env.get_template("nftables.conf.j2").render(bridge="br0", uplink="wlan0", web_port=80,
+        out = self.env.get_template("nftables.conf.j2").render(bridge="br0", uplink="wlan0", web_ports=[443, 80],
                                                               lan_net="192.168.1.0/24")
         self.assertIn("policy drop", out)
         self.assertIn('ip saddr != 192.168.1.0/24 drop', out)
         self.assertIn("5353", out)
         self.assertNotIn('iifname "wlan0"', out, "rien n'est ouvert depuis l'uplink")
+        self.assertIn("{ 53, 443, 80 }", out)
 
     def test_dnsmasq_and_hostapd(self):
         d = self.env.get_template("dnsmasq.conf.j2").render(bridge="br0", gateway="g", netmask="n", start="a", end="b",
@@ -135,9 +143,11 @@ class FsTests(unittest.TestCase):
     def setUp(self):
         self.ro = True
         self.remounts = []
-        fs._depth, fs._need_relock, fs._last_try = 0, False, 0.0
-        if os.path.exists(fs.FLAG):
-            os.remove(fs.FLAG)
+        self.partition = True
+        self.boot = "running"
+        fs._last_try = 0.0
+        if os.path.exists(fs.DISABLED):
+            os.remove(fs.DISABLED)
 
         def remount(mode):
             self.remounts.append(mode)
@@ -148,53 +158,166 @@ class FsTests(unittest.TestCase):
             mock.patch.object(fs, "root_ro", lambda: self.ro),
             mock.patch.object(fs, "_remount", remount),
             mock.patch.object(fs, "rescue", lambda: False),
-            mock.patch.object(fs.system, "run", lambda *a, **k: mock.Mock(returncode=0, stdout="running\n")),
+            mock.patch.object(fs, "has_data_partition", lambda: self.partition),
+            mock.patch.object(fs.system, "run", lambda *a, **k: mock.Mock(returncode=0, stdout=self.boot + "\n")),
         ]
         for p in self.patches:
             p.start()
             self.addCleanup(p.stop)
 
-    def test_writable_window_relocks(self):
-        with fs.writable():
-            self.assertFalse(self.ro)
-        self.assertTrue(self.ro)
-        self.assertEqual(self.remounts, ["rw", "ro"])
+    def test_enabled_by_default_with_data_partition(self):
+        self.assertTrue(fs.enabled())
+        self.assertEqual(set(fs.status()), {"available", "enabled", "locked", "rescue", "data"})
 
-    def test_nested_windows_relock_once(self):
-        with fs.writable():
-            with fs.writable():
-                pass
-            self.assertFalse(self.ro, "reste en écriture tant que la fenêtre externe est ouverte")
-        self.assertEqual(self.remounts, ["rw", "ro"])
-
-    def test_window_is_noop_when_not_locked(self):
-        self.ro = False
-        with fs.writable():
-            pass
-        self.assertEqual(self.remounts, [])
-
-    def test_maintain_locks_only_when_enabled_and_booted(self):
+    def test_unavailable_without_data_partition(self):
+        self.partition = False
+        self.assertFalse(fs.enabled())
+        with self.assertRaises(RuntimeError):
+            fs.set_enabled(True)
         self.ro = False
         fs.maintain()
-        self.assertEqual(self.remounts, [], "désactivé : on ne verrouille pas")
+        self.assertEqual(self.remounts, [], "sans partition de données, on ne verrouille jamais")
+
+    def test_maintain_locks_once_booted(self):
+        self.ro = False
+        fs.maintain()
+        self.assertTrue(self.ro)
+        self.assertEqual(self.remounts, ["ro"])
+
+    def test_maintain_waits_for_end_of_boot(self):
+        self.ro, self.boot = False, "starting"
+        fs.maintain()
+        self.assertEqual(self.remounts, [])
+
+    def test_disable_unlocks_and_persists(self):
+        fs.set_enabled(False)
+        self.assertFalse(self.ro)
+        self.assertTrue(os.path.exists(fs.DISABLED))
+        self.assertFalse(fs.enabled())
+        fs._last_try = 0.0
+        fs.maintain()
+        self.assertFalse(self.ro, "désactivé : on ne reverrouille pas")
+
+    def test_enable_locks_and_forgets_the_opt_out(self):
+        fs.set_enabled(False)
         fs.set_enabled(True)
         self.assertTrue(self.ro)
-        self.assertTrue(os.path.exists(fs.FLAG))
+        self.assertFalse(os.path.exists(fs.DISABLED))
 
     def test_rescue_never_locks(self):
         self.ro = False
-        fs.set_enabled(True)
-        self.ro = False
         with mock.patch.object(fs, "rescue", lambda: True):
-            fs._last_try = 0.0
             fs.maintain()
         self.assertFalse(self.ro)
 
-    def test_disable_leaves_card_writable(self):
-        fs.set_enabled(True)
-        fs.set_enabled(False)
-        self.assertFalse(self.ro)
-        self.assertFalse(os.path.exists(fs.FLAG))
+
+class TlsHelperTests(unittest.TestCase):
+    def test_validity_is_long_even_with_a_wrong_clock(self):
+        days, not_after = tls._validity(0.0)               # horloge à 1970 (pas de pile, pas encore de NTP)
+        self.assertGreaterEqual(not_after, tls.CLOCK_FLOOR + 825 * 86400)
+        self.assertGreater(days, 20000)
+        days, _ = tls._validity(tls.CLOCK_FLOOR + 10 * 86400)   # horloge correcte
+        self.assertEqual(days, 826)
+
+    def test_renewal_rules(self):
+        with mock.patch.object(tls, "ready", lambda: True), \
+                mock.patch.object(tls, "_meta", lambda: {"ip": "192.168.1.1", "not_after": tls.CLOCK_FLOOR + 800 * 86400}):
+            now = tls.CLOCK_FLOOR + 10 * 86400
+            self.assertFalse(tls.needs_renewal("192.168.1.1", now))
+            self.assertTrue(tls.needs_renewal("10.0.0.1", now), "nouvelle IP : nouveau certificat")
+            self.assertTrue(tls.needs_renewal("192.168.1.1", tls.CLOCK_FLOOR + 760 * 86400), "proche de l'échéance")
+            self.assertFalse(tls.needs_renewal("192.168.1.1", 100.0), "horloge fausse : pas de renouvellement")
+
+
+def _openssl_ok():
+    try:
+        out = subprocess.run(["openssl", "req", "-help"], capture_output=True, text=True, timeout=10)
+        return "-addext" in out.stdout + out.stderr
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+@unittest.skipUnless(_openssl_ok(), "openssl avec -addext requis")
+class TlsCertTests(unittest.TestCase):
+    def setUp(self):
+        import shutil
+        shutil.rmtree(tls.TLS_DIR, ignore_errors=True)
+
+    def test_certificate_is_created_once_and_is_valid(self):
+        self.assertTrue(tls.ensure("192.168.1.1/24"))
+        self.assertTrue(tls.ready())
+        fp = tls.fingerprint()
+        self.assertRegex(fp, r"^([0-9A-F]{2}:){31}[0-9A-F]{2}$")
+        self.assertFalse(tls.ensure("192.168.1.1/24"), "pas de nouveau certificat si rien n'a changé")
+        self.assertEqual(tls.fingerprint(), fp)
+        text = subprocess.run(["openssl", "x509", "-in", tls.paths()[0], "-noout", "-text"],
+                              capture_output=True, text=True).stdout
+        for expected in ("DNS:erouter.local", "DNS:erouter", "IP Address:192.168.1.1", "CA:FALSE", "prime256v1"):
+            self.assertIn(expected, text)
+        self.assertEqual(os.stat(tls.paths()[1]).st_mode & 0o007, 0, "clé privée illisible pour 'autres'")
+
+    def test_new_address_gives_new_certificate(self):
+        tls.ensure("192.168.1.1/24")
+        fp = tls.fingerprint()
+        self.assertTrue(tls.ensure("10.0.0.1/24"))
+        self.assertNotEqual(tls.fingerprint(), fp)
+
+
+class RedirectTests(unittest.TestCase):
+    def start(self, https_port=443):
+        srv = webd._serve_redirect(0, https_port)
+        self.addCleanup(lambda: (srv.shutdown(), srv.server_close()))
+        return srv.server_address[1]
+
+    def get(self, port, host, path="/"):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", path, headers={"Host": host})
+        r = conn.getresponse()
+        r.read()
+        conn.close()
+        return r.status, r.getheader("Location")
+
+    def test_redirects_to_https_on_the_same_host(self):
+        port = self.start()
+        self.assertEqual(self.get(port, "erouter.local", "/x?y=1"), (308, "https://erouter.local/x?y=1"))
+        self.assertEqual(self.get(port, "192.168.1.1:80"), (308, "https://192.168.1.1/"))
+
+    def test_non_default_https_port_is_kept(self):
+        port = self.start(8443)
+        self.assertEqual(self.get(port, "erouter"), (308, "https://erouter:8443/"))
+
+    def test_foreign_host_is_refused_no_open_redirect(self):
+        port = self.start()
+        status, location = self.get(port, "evil.example.com")
+        self.assertEqual(status, 400)
+        self.assertIsNone(location)
+
+
+class AgentTlsTests(unittest.TestCase):
+    def setUp(self):
+        agent._tls_failed_at = 0.0
+        self.cfg = config.sanitize(config.DEFAULTS)
+
+    def test_web_restarted_only_when_certificate_changed(self):
+        with mock.patch.object(tls, "ensure", return_value=True), mock.patch.object(system, "run") as run:
+            agent._maintain_tls(self.cfg)
+        self.assertIn(["systemctl", "try-restart", "--no-block", "erouter-web"], [c.args[0] for c in run.call_args_list])
+        with mock.patch.object(tls, "ensure", return_value=False), mock.patch.object(system, "run") as run:
+            agent._maintain_tls(self.cfg)
+        run.assert_not_called()
+
+    def test_failure_is_contained_and_backed_off(self):
+        boom = mock.Mock(side_effect=RuntimeError("openssl absent"))
+        with mock.patch.object(tls, "ensure", boom), self.assertLogs("erouter.agent", "ERROR"):
+            agent._maintain_tls(self.cfg)
+            agent._maintain_tls(self.cfg)
+        self.assertEqual(boom.call_count, 1)
+
+    def test_disabled_tls_does_nothing(self):
+        self.cfg["web"]["tls"] = False
+        with mock.patch.object(tls, "ensure") as ensure:
+            agent._maintain_tls(self.cfg)
+        ensure.assert_not_called()
 
 
 class AgentBaseTests(unittest.TestCase):
@@ -276,7 +399,8 @@ class WebTests(unittest.TestCase):
         methods.update({
             "status": lambda: {"uplink": {"connected": True, "internet": True},
                                "ap": {"enabled": True, "channel": 6, "active": True}, "warnings": [],
-                               "fs": {"enabled": True, "locked": True, "rescue": False}, "clients": 3, "uptime": 99},
+                               "fs": {"available": True, "enabled": True, "locked": True, "rescue": False, "data": "ok"},
+                               "tls": {"enabled": True, "ready": True, "fingerprint": "AA:BB"}, "clients": 3, "uptime": 99},
             "scan": lambda rescan=False: {"networks": [], "saved": []},
             "connect": m_connect,
             "forget": lambda ssid: True,
@@ -314,6 +438,23 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.c.get("/api/status").status_code, 401)
         self.login()
         self.assertEqual(self.c.post("/api/reboot", data="x").status_code, 415)
+
+    def test_session_cookie_is_host_prefixed_and_secure_in_https_mode(self):
+        web.configure(True)
+        try:
+            r = self.login()
+            cookie = r.headers["Set-Cookie"]
+            for part in ("__Host-erouter=", "Secure", "HttpOnly", "SameSite=Strict", "Path=/"):
+                self.assertIn(part, cookie)
+            self.assertNotIn("Domain=", cookie)
+        finally:
+            web.configure(False)
+
+    def test_status_exposes_tls_fingerprint_and_data_state(self):
+        self.login()
+        s = self.c.get("/api/status").get_json()
+        self.assertEqual(s["tls"]["fingerprint"], "AA:BB")
+        self.assertEqual(s["fs"]["data"], "ok")
 
     def test_warns_about_default_hotspot_password(self):
         self.login()

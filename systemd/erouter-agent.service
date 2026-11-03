@@ -1,7 +1,7 @@
 [Unit]
 Description=EmergencyRouter agent (privilégié, sans accès réseau externe)
-After=NetworkManager.service
-Wants=NetworkManager.service
+After=erouter-data.service NetworkManager.service
+Wants=erouter-data.service NetworkManager.service
 
 [Service]
 Type=simple

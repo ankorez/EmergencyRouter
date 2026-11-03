@@ -41,6 +41,12 @@ app.config.update(
 )
 
 
+def configure(secure):
+    """Cookie de session : `__Host-` + Secure dès que l'interface est servie en HTTPS."""
+    app.config.update(SESSION_COOKIE_SECURE=bool(secure),
+                      SESSION_COOKIE_NAME="__Host-erouter" if secure else "erouter")
+
+
 def init_secret(timeout=30):
     """Fixe la clé de session persistante. Le secret est créé par l'agent : on l'attend quelques secondes."""
     deadline = time.monotonic() + timeout
