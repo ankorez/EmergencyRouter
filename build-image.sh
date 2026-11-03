@@ -4,9 +4,6 @@
 # Résultat : dist/*.img.xz  (à flasher avec Raspberry Pi Imager → « Utiliser un fichier personnalisé »)
 set -euo pipefail
 
-# Tout le script est dans une fonction : bash le lit en entier avant de l'exécuter, donc le modifier pendant
-# qu'un build tourne (plusieurs minutes) ne peut plus le corrompre.
-main() {
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 PIGEN="${PIGEN_DIR:-$HOME/.cache/erouter-pigen}"      # chemin sans espace
 BRANCH="${PIGEN_BRANCH:-arm64}"                         # branche 64 bits de pi-gen
@@ -69,6 +66,3 @@ rm -f "$ROOT"/dist/*.img.xz "$ROOT/dist/SHA256SUMS"
 cp -v "$IMG.xz" "$ROOT/dist/"
 (cd "$ROOT/dist" && shasum -a 256 -- "$NAME.xz" | tee SHA256SUMS)
 echo "Image prête dans $ROOT/dist/ (empreinte SHA-256 dans dist/SHA256SUMS)"
-}
-
-main "$@"
