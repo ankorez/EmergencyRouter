@@ -33,12 +33,31 @@ le **système en lecture seule** : on peut couper le courant à tout moment.
 ./build-image.sh        # Docker requis, ~25 Go libres dans la VM Docker ; résultat : dist/*.img.xz + SHA256SUMS
 ```
 
-1. Flasher avec Raspberry Pi Imager (« Utiliser un fichier personnalisé ») ; utilisateur et clé SSH se règlent dans l'Imager,
-   l'image n'embarque aucun mot de passe. Vérifie l'empreinte avec `shasum -a 256 -c SHA256SUMS`.
+1. Flasher avec Raspberry Pi Imager (« Utiliser un fichier personnalisé »). Le compte d'administration est déjà dans
+   l'image (voir « Accès SSH ») : **ne règle pas d'utilisateur dans l'Imager**. Vérifie l'empreinte avec
+   `shasum -a 256 -c SHA256SUMS`.
 2. Au premier démarrage, le hotspot **`ERouter-Setup`** (mot de passe `erouter-setup`) sert à la configuration.
 3. Ouvre **https://192.168.1.1/** (ou `https://erouter.local/`) : le navigateur avertit que le certificat est auto-signé
    (normal : compare l'empreinte SHA-256 affichée en bas de la page), choisis le mot de passe admin, puis règle le vrai
    SSID/mot de passe du hotspot et le Wi-Fi de la 5G.
+
+### Accès SSH
+
+L'image contient un compte d'administration **par clé uniquement** : `build-image.sh` y met ta clé publique
+(`~/.ssh/id_ed25519.pub`, sinon `id_ecdsa.pub`, sinon `id_rsa.pub`) et crée l'utilisateur `pi`.
+
+```
+ssh pi@192.168.1.1        # depuis le hotspot ERouter-Setup ou le câble Ethernet du Pi
+```
+
+- Le SSH n'est joignable que depuis le **réseau du routeur** (hotspot ou Ethernet), jamais depuis l'uplink (Wi-Fi de la box, 5G).
+- Pas de mot de passe : celui du compte est aléatoire et jamais conservé ; la connexion par mot de passe est désactivée.
+  `sudo` fonctionne sans mot de passe pour ce compte.
+- Réglages du build : `SSH_USER=nom` (défaut `pi`), `SSH_PUBKEY_FILE=chemin/clé.pub`, ou `NO_ADMIN_USER=1` pour une image
+  sans compte (à créer alors avec Raspberry Pi Imager).
+- L'image contient ta clé **publique** (le commentaire de la clé, qui trahit le nom de ta machine, n'est pas copié) : si tu
+  publies l'image, personne d'autre ne pourra s'y connecter. Si tu perds ta clé, il faut reflasher.
+- Après un reflash, `ssh-keygen -R 192.168.1.1` (et `-R erouter.local`) évite l'avertissement « clé d'hôte modifiée ».
 
 ### Installation manuelle sur Raspberry Pi OS Lite
 

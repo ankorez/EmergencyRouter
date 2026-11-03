@@ -14,7 +14,7 @@ section "Installation des outils"
 apt-get update -qq >/dev/null 2>&1
 apt-get install -y -qq --no-install-recommends python3 python3-flask python3-yaml python3-jinja2 python3-gunicorn \
   openssl nftables dnsmasq-base hostapd systemd shellcheck ca-certificates curl e2fsprogs fdisk mtools dosfstools \
-  mount util-linux xz-utils python3-pyflakes procps >/dev/null 2>&1 || { echo "apt a échoué"; exit 1; }
+  mount util-linux xz-utils python3-pyflakes procps openssh-client openssh-server >/dev/null 2>&1 || { echo "apt a échoué"; exit 1; }
 python3 -c "from importlib.metadata import version as v; print('python', __import__('sys').version.split()[0], '| flask', v('flask'), '| gunicorn', v('gunicorn'), '|', end=' ')"
 openssl version
 id erouter >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin erouter
@@ -138,6 +138,36 @@ loc=$(curl -sI http://127.0.0.1:8080/api/x?y=1 | tr -d '\r' | awk 'tolower($1)==
 [ "$(curl -s -o /dev/null -w '%{http_code}' --cacert $CRT https://127.0.0.1:8443/api/status)" = 401 ] && ok "API protégée (401 sans connexion)" || bad "API non protégée"
 ps -eo user,args | grep -v grep | grep -q "^erouter .*erouter.webd" && ok "le serveur tourne sous l'utilisateur erouter, pas root" || bad "utilisateur du serveur"
 grep -i -E "traceback|error" /tmp/web.log | head -3 | sed 's/^/    /'
+
+section "Compte d'administration SSH (clé uniquement)"
+ssh-keygen -q -t ed25519 -N '' -C 'jean@portable; echo pwned' -f /tmp/k
+bash /work/image/ssh-config.sh /tmp/k.pub pi > /tmp/cfg1 2>/tmp/cfg.err; rc=$?
+[ "$rc" -eq 0 ] && ok "ssh-config.sh : clé valide acceptée" || { bad "ssh-config.sh a échoué"; cat /tmp/cfg.err; }
+bash /work/image/ssh-config.sh /tmp/k.pub pi > /tmp/cfg2
+blob=$(awk '{print $2}' /tmp/k.pub)
+(
+  # shellcheck disable=SC1091
+  . /tmp/cfg1
+  [ "$FIRST_USER_NAME" = pi ] && [ "$PUBKEY_ONLY_SSH" = 1 ] && [ "$DISABLE_FIRST_BOOT_USER_RENAME" = 1 ] && [ "$PASSWORDLESS_SUDO" = 1 ] \
+    && [ "$PUBKEY_SSH_FIRST_USER" = "ssh-ed25519 $blob erouter-admin" ] && [ "${#FIRST_USER_PASS}" -ge 30 ]
+) && ok "la config relue par bash est exacte (clé sans son commentaire, mot de passe long)" || bad "config relue incorrecte"
+grep -q "pwned\|portable" /tmp/cfg1 && bad "le commentaire de la clé a fuité dans l'image" || ok "le commentaire de la clé (nom de ta machine) n'est pas injecté"
+[ "$(grep FIRST_USER_PASS /tmp/cfg1)" != "$(grep FIRST_USER_PASS /tmp/cfg2)" ] && ok "mot de passe aléatoire différent à chaque build" || bad "mot de passe identique"
+bash /work/image/ssh-config.sh /tmp/k pi >/dev/null 2>&1 && bad "une clé PRIVÉE a été acceptée" || ok "clé privée refusée"
+for u in "Bad User" 'x;rm -rf /' '-oProxy' 'Root'; do
+  bash /work/image/ssh-config.sh /tmp/k.pub "$u" >/dev/null 2>&1 && bad "nom d'utilisateur accepté : '$u'" || ok "nom d'utilisateur refusé : '$u'"
+done
+[ "$(bash /work/image/ssh-config.sh /tmp/k.pub | grep '^FIRST_USER_NAME=')" = "FIRST_USER_NAME=pi" ] && ok "utilisateur par défaut : pi" || bad "utilisateur par défaut"
+echo "ssh-dss AAAAB3NzaC1kc3MAAACB comment" > /tmp/dss.pub
+bash /work/image/ssh-config.sh /tmp/dss.pub >/dev/null 2>&1 && bad "type de clé obsolète accepté" || ok "type de clé obsolète (dsa) refusé"
+: > /tmp/empty.pub
+bash /work/image/ssh-config.sh /tmp/empty.pub >/dev/null 2>&1 && bad "fichier vide accepté" || ok "fichier vide refusé"
+ssh-keygen -A >/dev/null 2>&1; mkdir -p /etc/ssh/sshd_config.d; cp /work/image/90-erouter-sshd.conf /etc/ssh/sshd_config.d/90-erouter.conf
+check "sshd -t : configuration valide avec le durcissement" /usr/sbin/sshd -t
+eff=$(/usr/sbin/sshd -T 2>/dev/null)
+for want in "permitrootlogin no" "passwordauthentication no" "kbdinteractiveauthentication no" "maxauthtries 3" "allowtcpforwarding no" "x11forwarding no"; do
+  echo "$eff" | grep -qx "$want" && ok "sshd effectif : $want" || bad "sshd effectif : $want absent"
+done
 
 section "Bilan"
 if [ "$FAIL" -eq 0 ]; then echo "TOUT EST OK"; else echo "$FAIL vérification(s) en échec"; fi

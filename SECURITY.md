@@ -20,6 +20,7 @@ Il ne protège pas contre un attaquant qui a un accès physique au Pi (carte SD,
 | Configuration | le web ne peut pas écrire le fichier : il demande à l'agent, qui nettoie, valide (anti-injection dans dnsmasq/hostapd) et écrit ; la config est revalidée à chaque lecture |
 | HTTPS | certificat auto-signé EC P-256 créé par l'agent, clé privée `640 root:erouter`, TLS 1.2 minimum, redirection du port 80, cookie de session `__Host-` + `Secure` ; l'empreinte du certificat est affichée dans l'interface |
 | Web | en-têtes CSP stricte (aucun script ni style en ligne), `X-Frame-Options`, `nosniff`, sessions `SameSite=Strict`, contrôle du `Host` (anti DNS-rebinding) et de l'`Origin` (anti CSRF), 5 essais de connexion par minute, hash de mot de passe scrypt, sessions invalidées au changement de mot de passe, taille des requêtes limitée, aucune version de serveur annoncée |
+| SSH | uniquement depuis le réseau du routeur, limité en débit ; connexion **par clé uniquement** (mot de passe désactivé, compte sans mot de passe utilisable), `root` interdit, 3 essais, pas de redirection de ports ni d'agent |
 | Carte SD | système en lecture seule une fois démarré, données sur une partition séparée vérifiée/réparée/recréée à chaque démarrage (voir README), journaux en RAM |
 | Chaîne d'approvisionnement | uniquement des paquets Debian signés (aucun `pip`) ; `pi-gen` épinglé sur un commit précis ; actions GitHub épinglées par empreinte ; image publiée avec son SHA-256 |
 
@@ -31,7 +32,7 @@ Il ne protège pas contre un attaquant qui a un accès physique au Pi (carte SD,
 - **Mot de passe Wi-Fi visible** dans l'interface (nécessaire pour le reproduire sur le même SSID que la box) et stocké en clair dans `/etc/erouter/config.yaml` (lisible par `root` et le groupe `erouter` uniquement).
 - **Mot de passe du Wi-Fi 5G passé à `nmcli` en argument** : visible brièvement dans la liste des processus, donc seulement par un utilisateur local du Pi.
 - **mDNS (Avahi)** : `erouter.local` peut être annoncé sur le réseau de la 5G ; il n'ouvre aucun service (le pare-feu bloque tout).
-- **SSH** : à configurer par clé dans Raspberry Pi Imager ; évite le mot de passe.
+- **SSH** : l'image contient la clé publique de celui qui l'a construite ; `sudo` y est sans mot de passe pour le compte d'administration (qui n'a pas de mot de passe utilisable). Qui possède la clé privée administre le routeur.
 
 ## Signaler une faille
 

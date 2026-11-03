@@ -3,7 +3,7 @@
 
 install -d -m 755 "${ROOTFS_DIR}/opt/erouter" "${ROOTFS_DIR}/usr/share/erouter" "${ROOTFS_DIR}/data" \
 	"${ROOTFS_DIR}/etc/NetworkManager/conf.d" "${ROOTFS_DIR}/etc/systemd/journald.conf.d" \
-	"${ROOTFS_DIR}/etc/sysctl.d" "${ROOTFS_DIR}/usr/local/sbin"
+	"${ROOTFS_DIR}/etc/sysctl.d" "${ROOTFS_DIR}/etc/ssh/sshd_config.d" "${ROOTFS_DIR}/usr/local/sbin"
 
 rm -rf "${ROOTFS_DIR}/opt/erouter/erouter"
 cp -r files/erouter "${ROOTFS_DIR}/opt/erouter/erouter"
@@ -11,6 +11,7 @@ install -m 644 files/systemd/erouter-*.service "${ROOTFS_DIR}/etc/systemd/system
 install -m 644 files/systemd/90-erouter.conf "${ROOTFS_DIR}/etc/NetworkManager/conf.d/90-erouter.conf"
 install -m 644 files/systemd/journald-erouter.conf "${ROOTFS_DIR}/etc/systemd/journald.conf.d/erouter.conf"
 install -m 644 files/systemd/90-erouter-sysctl.conf "${ROOTFS_DIR}/etc/sysctl.d/90-erouter.conf"
+install -m 644 files/90-erouter-sshd.conf "${ROOTFS_DIR}/etc/ssh/sshd_config.d/90-erouter.conf"
 install -m 755 files/scripts/erouter-fs files/scripts/erouter-data "${ROOTFS_DIR}/usr/local/sbin/"
 # Config par défaut : copiée dans la partition de données au premier démarrage (erouter-data)
 install -m 644 files/config.image.yaml "${ROOTFS_DIR}/usr/share/erouter/config.default.yaml"

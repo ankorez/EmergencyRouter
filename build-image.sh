@@ -33,7 +33,7 @@ mkdir -p "$FILES/systemd" "$FILES/scripts"
 rsync -a --exclude __pycache__ "$ROOT/erouter/" "$FILES/erouter/"
 cp "$ROOT"/systemd/* "$FILES/systemd/"
 cp "$ROOT"/scripts/* "$FILES/scripts/"
-cp "$ROOT/image/config.image.yaml" "$FILES/config.image.yaml"
+cp "$ROOT/image/config.image.yaml" "$ROOT/image/90-erouter-sshd.conf" "$FILES/"
 VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$ROOT/erouter/__init__.py")"
 COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo inconnue)"
 git -C "$ROOT" diff --quiet HEAD -- 2>/dev/null || COMMIT="$COMMIT-modifié"   # modifications non commitées
@@ -44,6 +44,25 @@ chmod +x "$PIGEN/stage-erouter/prerun.sh" "$PIGEN/stage-erouter/00-install/00-ru
 # Pas d'image « Lite » standard : seule la nôtre est exportée
 touch "$PIGEN/stage2/SKIP_IMAGES"
 cp "$ROOT/image/config" "$PIGEN/config"
+
+# Compte d'administration : connexion par clé SSH uniquement (voir image/ssh-config.sh).
+# SSH_USER (défaut : pi), SSH_PUBKEY_FILE (défaut : ta première clé ~/.ssh/id_*.pub), NO_ADMIN_USER=1 pour s'en passer.
+if [ "${NO_ADMIN_USER:-0}" != 1 ]; then
+  SSH_PUBKEY_FILE="${SSH_PUBKEY_FILE:-}"
+  if [ -z "$SSH_PUBKEY_FILE" ]; then
+    for f in "$HOME/.ssh/id_ed25519.pub" "$HOME/.ssh/id_ecdsa.pub" "$HOME/.ssh/id_rsa.pub"; do
+      if [ -r "$f" ]; then SSH_PUBKEY_FILE="$f"; break; fi
+    done
+  fi
+  [ -n "$SSH_PUBKEY_FILE" ] || {
+    echo "Aucune clé SSH publique trouvée dans ~/.ssh : crée-en une (ssh-keygen -t ed25519) ou donne SSH_PUBKEY_FILE=..." >&2
+    echo "(NO_ADMIN_USER=1 construit une image sans compte : il faudra alors le créer avec Raspberry Pi Imager.)" >&2
+    exit 1
+  }
+  bash "$ROOT/image/ssh-config.sh" "$SSH_PUBKEY_FILE" "${SSH_USER:-pi}" >> "$PIGEN/config"
+  trap 'rm -f "$PIGEN/config"' EXIT          # la config contient le mot de passe aléatoire : on ne la garde pas
+  echo "==> Compte d'administration « ${SSH_USER:-pi} » (clé : $(ssh-keygen -lf "$SSH_PUBKEY_FILE" | cut -d' ' -f1-2))"
+fi
 
 cd "$PIGEN"
 rm -f deploy/*.img deploy/*.img.xz            # pas de confusion avec un build précédent
