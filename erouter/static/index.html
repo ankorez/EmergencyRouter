@@ -79,21 +79,15 @@
     </form>
   </section>
 
-  <section class="card">
-    <h2>Carte SD</h2>
-    <div class="hero"><span class="dot" id="fsDot"></span>
-      <div><div class="big" id="fsTitle">…</div><div class="muted" id="fsSub"></div></div></div>
-    <p class="muted small" id="fsHelp"></p>
-    <p class="muted small" id="fsData"></p>
-    <button id="fsBtn" hidden></button>
-  </section>
-
   <section class="card wide">
     <h2>Appareils connectés</h2>
     <div class="table-wrap"><table><thead><tr><th>Nom</th><th>IP</th><th>MAC</th><th>Type</th></tr></thead><tbody id="clients"></tbody></table></div>
   </section>
 </main>
-<footer class="foot muted small" id="tlsInfo" hidden></footer>
+<footer class="foot muted small">
+  <div id="buildInfo"></div>
+  <div id="tlsInfo" hidden></div>
+</footer>
 </div>
 
 <dialog id="joinDlg">

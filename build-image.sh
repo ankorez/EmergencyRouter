@@ -34,6 +34,11 @@ rsync -a --exclude __pycache__ "$ROOT/erouter/" "$FILES/erouter/"
 cp "$ROOT"/systemd/* "$FILES/systemd/"
 cp "$ROOT"/scripts/* "$FILES/scripts/"
 cp "$ROOT/image/config.image.yaml" "$FILES/config.image.yaml"
+VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$ROOT/erouter/__init__.py")"
+COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo inconnue)"
+git -C "$ROOT" diff --quiet HEAD -- 2>/dev/null || COMMIT="$COMMIT-modifié"   # modifications non commitées
+printf '{"version": "%s", "commit": "%s", "built": "%s", "os": "Debian 13 (trixie) arm64"}\n' \
+  "$VERSION" "$COMMIT" "$(date -u +%Y-%m-%d)" > "$FILES/build-info.json"
 chmod +x "$PIGEN/stage-erouter/prerun.sh" "$PIGEN/stage-erouter/00-install/00-run.sh"
 
 # Pas d'image « Lite » standard : seule la nôtre est exportée

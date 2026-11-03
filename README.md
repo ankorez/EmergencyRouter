@@ -64,7 +64,7 @@ Sans l'image il n'y a pas de partition de données séparée : la protection de 
 | `erouter-data` (`scripts/erouter-data`) | root, au démarrage | vérifie, répare ou recrée la partition de données `/data`, puis la monte |
 | `erouter-agent` (`agent.py`, `agentd.py`, `lan.py`, `tls.py`, `fs.py`) | root | pont `br0`, `ap0`, hostapd, dnsmasq, nftables ; suit le canal de l'uplink ; surveille Internet ; certificat HTTPS ; verrouillage du système ; seul à écrire la config |
 | `erouter-web` (`web.py`, `webd.py`, `static/`) | utilisateur `erouter`, système en lecture seule, seul droit : ports 80/443 | API Flask + interface (sans dépendance externe, fonctionne hors-ligne), servie en HTTPS par gunicorn ; le port 80 redirige vers HTTPS |
-| `rpc.py` | | socket local `/run/erouter/agent.sock` (0660 root:erouter) ; l'agent n'expose que 8 méthodes et valide chaque paramètre |
+| `rpc.py` | | socket local `/run/erouter/agent.sock` (0660 root:erouter) ; l'agent n'expose que 7 méthodes et valide chaque paramètre |
 
 Services supplémentaires : `erouter-hostapd`, `erouter-dnsmasq`. Détails et limites : [SECURITY.md](SECURITY.md).
 
@@ -86,7 +86,8 @@ Un routeur de secours dort longtemps puis subit une coupure de courant. L'image 
 - Le système n'est écrit que pendant le démarrage (le temps que tout soit lancé), puis verrouillé.
 - La racine n'est **pas** agrandie au premier démarrage (le mot `resize` est retiré de `cmdline.txt`) : le reste de la carte est inutilisé.
 - Journaux et baux DHCP en RAM, pas de swap, pas de mises à jour automatiques.
-- L'état se voit (et se règle) dans l'interface, carte « Carte SD », ou : `sudo erouter-fs status | lock | unlock`.
+- L'état se voit et se règle en ligne de commande : `sudo erouter-fs status | lock | unlock`. L'interface n'affiche que les
+  avertissements (partition de données réparée ou recréée).
 - **Mettre à jour le système** : `sudo erouter-fs unlock && sudo reboot`, puis `sudo apt update && sudo apt upgrade`,
   puis `sudo erouter-fs lock`.
 - **Sortie de secours** : retire la carte, ouvre `cmdline.txt` sur la partition de boot (visible depuis un Mac) et ajoute

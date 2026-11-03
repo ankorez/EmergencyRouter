@@ -450,6 +450,29 @@ class WebTests(unittest.TestCase):
         finally:
             web.configure(False)
 
+    def test_version_is_only_shown_after_login(self):
+        self.assertNotIn("version", self.c.get("/api/session").get_json(), "pas de version pour un visiteur anonyme")
+        self.login()
+        info = os.path.join(_TMP, "build-info.json")
+        with open(info, "w") as f:
+            json.dump({"version": "9.9.9", "commit": "abc1234", "built": "2026-11-04", "os": "Debian 13", "evil": "x"}, f)
+        with mock.patch.object(web, "BUILD_INFO", info):
+            b = self.c.get("/api/status").get_json()["build"]
+        self.assertEqual((b["version"], b["commit"], b["built"], b["os"]), ("9.9.9", "abc1234", "2026-11-04", "Debian 13"))
+        self.assertNotIn("evil", b, "seules les clés connues sont exposées")
+
+    def test_build_info_falls_back_to_package_version(self):
+        for content in (None, "pas du json", "[1, 2]", json.dumps({"version": "x" * 500})):
+            with self.subTest(content):
+                path = os.path.join(_TMP, "bi.json")
+                if content is None:
+                    path = os.path.join(_TMP, "absent.json")
+                else:
+                    with open(path, "w") as f:
+                        f.write(content)
+                with mock.patch.object(web, "BUILD_INFO", path):
+                    self.assertEqual(web.build_info()["version"], web.__version__)
+
     def test_status_exposes_tls_fingerprint_and_data_state(self):
         self.login()
         s = self.c.get("/api/status").get_json()

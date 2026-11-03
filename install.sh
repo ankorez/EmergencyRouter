@@ -32,6 +32,8 @@ cp -r "$SRC/erouter" /opt/erouter/erouter
 find /opt/erouter -name __pycache__ -prune -exec rm -rf {} +
 chown -R root:root /opt/erouter && chmod -R go-w /opt/erouter
 install -m 644 "$SRC/config.example.yaml" /usr/share/erouter/config.default.yaml
+VERSION="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SRC/erouter/__init__.py")"
+printf '{"version": "%s", "built": "%s", "source": "install.sh"}\n' "$VERSION" "$(date -u +%Y-%m-%d)" > /usr/share/erouter/build-info.json
 install -m 755 "$SRC/scripts/erouter-fs" "$SRC/scripts/erouter-data" /usr/local/sbin/
 
 # Ancien service unique (versions précédentes)

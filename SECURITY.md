@@ -16,7 +16,7 @@ Il ne protège pas contre un attaquant qui a un accès physique au Pi (carte SD,
 |---|---|
 | Pare-feu | nftables, politique « drop » : rien n'est joignable depuis l'uplink (5G) ; depuis le LAN seulement DHCP, DNS, mDNS, web et SSH (SSH limité en débit) ; anti-usurpation d'adresse source |
 | Privilèges | l'interface web tourne sous un utilisateur dédié, sans droits (seul le port 80 est autorisé), avec un système de fichiers en lecture seule et un filtre d'appels système |
-| Agent root | n'écoute que sur un socket Unix (0660 `root:erouter`), expose 8 méthodes, valide chaque paramètre ; aucune commande n'est lancée via un shell |
+| Agent root | n'écoute que sur un socket Unix (0660 `root:erouter`), expose 7 méthodes, valide chaque paramètre ; aucune commande n'est lancée via un shell |
 | Configuration | le web ne peut pas écrire le fichier : il demande à l'agent, qui nettoie, valide (anti-injection dans dnsmasq/hostapd) et écrit ; la config est revalidée à chaque lecture |
 | HTTPS | certificat auto-signé EC P-256 créé par l'agent, clé privée `640 root:erouter`, TLS 1.2 minimum, redirection du port 80, cookie de session `__Host-` + `Secure` ; l'empreinte du certificat est affichée dans l'interface |
 | Web | en-têtes CSP stricte (aucun script ni style en ligne), `X-Frame-Options`, `nosniff`, sessions `SameSite=Strict`, contrôle du `Host` (anti DNS-rebinding) et de l'`Origin` (anti CSRF), 5 essais de connexion par minute, hash de mot de passe scrypt, sessions invalidées au changement de mot de passe, taille des requêtes limitée, aucune version de serveur annoncée |

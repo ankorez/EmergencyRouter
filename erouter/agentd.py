@@ -7,7 +7,7 @@ import logging
 import subprocess
 import threading
 
-from . import agent, config, fs, lan, rpc, system
+from . import agent, config, lan, rpc, system
 
 log = logging.getLogger("erouter.agentd")
 
@@ -61,18 +61,13 @@ def m_save_config(cfg):
     return True
 
 
-def m_fs_set(enabled):
-    fs.set_enabled(bool(enabled))
-    return fs.status()
-
-
 def m_reboot():
     subprocess.Popen(["systemctl", "reboot"])
     return True
 
 
 METHODS = {"status": m_status, "scan": m_scan, "connect": m_connect, "forget": m_forget,
-           "clients": m_clients, "save_config": m_save_config, "fs_set": m_fs_set, "reboot": m_reboot}
+           "clients": m_clients, "save_config": m_save_config, "reboot": m_reboot}
 
 
 def _ensure_secret():

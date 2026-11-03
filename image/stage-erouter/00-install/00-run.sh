@@ -14,6 +14,7 @@ install -m 644 files/systemd/90-erouter-sysctl.conf "${ROOTFS_DIR}/etc/sysctl.d/
 install -m 755 files/scripts/erouter-fs files/scripts/erouter-data "${ROOTFS_DIR}/usr/local/sbin/"
 # Config par défaut : copiée dans la partition de données au premier démarrage (erouter-data)
 install -m 644 files/config.image.yaml "${ROOTFS_DIR}/usr/share/erouter/config.default.yaml"
+install -m 644 files/build-info.json "${ROOTFS_DIR}/usr/share/erouter/build-info.json"
 
 on_chroot << CHROOT
 id erouter >/dev/null 2>&1 || adduser --system --group --no-create-home --shell /usr/sbin/nologin erouter

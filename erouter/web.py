@@ -1,6 +1,7 @@
 """Interface web (service sans privilèges). Tout ce qui touche au système passe par l'agent (rpc.py)."""
 import functools
 import hashlib
+import json
 import logging
 import os
 import re
@@ -18,6 +19,7 @@ from . import __version__, config, rpc
 log = logging.getLogger("erouter.web")
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
+BUILD_INFO = os.environ.get("EROUTER_BUILD_INFO", "/usr/share/erouter/build-info.json")
 DEFAULT_AP_PASSWORDS = ("erouter-setup", "changeme123")   # mots de passe de démonstration, publics
 PASSWORD_MIN, PASSWORD_MAX = 8, 128      # le maximum évite de faire calculer un hash sur une entrée géante
 MAX_FAILURES, FAILURE_WINDOW = 5, 60     # 5 échecs par minute et par adresse
@@ -57,6 +59,20 @@ def init_secret(timeout=30):
     if not secret:
         log.warning("secret de session absent : clé temporaire (les sessions ne survivront pas à un redémarrage)")
     app.secret_key = secret or _BOOT_SECRET
+
+
+def build_info():
+    """Version du logiciel et de l'image (écrite à la construction) : affichée seulement après connexion."""
+    info = {"version": __version__}
+    try:
+        with open(BUILD_INFO) as f:
+            data = json.load(f)
+        for key in ("version", "commit", "built", "os", "source"):
+            if isinstance(data.get(key), str) and len(data[key]) <= 64:
+                info[key] = data[key]
+    except (OSError, ValueError, AttributeError):
+        pass
+    return info
 
 
 def _cfg():
@@ -164,7 +180,7 @@ def static_files(name):
 def get_session():
     cfg = _cfg()
     ok = bool(session.get("ok")) and session.get("pv") == _fingerprint(cfg)
-    return jsonify(setup_needed=not cfg["web"]["password_hash"], authenticated=ok, version=__version__)
+    return jsonify(setup_needed=not cfg["web"]["password_hash"], authenticated=ok)
 
 
 @app.post("/api/login")
@@ -226,6 +242,7 @@ def status():
     s = rpc.call("status")
     s["lan"] = {"address": cfg["lan"]["address"], "clients": s.pop("clients")}
     s["ap"]["ssid"] = cfg["ap"]["ssid"]
+    s["build"] = build_info()
     if cfg["ap"]["password"] in DEFAULT_AP_PASSWORDS:
         s["warnings"].append("Le hotspot utilise encore un mot de passe par défaut, connu de tous : "
                              "change-le dans « Réglages du hotspot ».")
@@ -295,15 +312,6 @@ def set_settings():
 @auth
 def clients():
     return jsonify(clients=rpc.call("clients"))
-
-
-@app.post("/api/fs")
-@auth
-def set_fs():
-    try:
-        return jsonify(rpc.call("fs_set", enabled=bool(request.get_json().get("enabled"))))
-    except RuntimeError as e:
-        return err(e, 500)
 
 
 @app.post("/api/reboot")
