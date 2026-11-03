@@ -1,0 +1,8 @@
+[Unit]
+Description=EmergencyRouter DHCP/DNS (dnsmasq)
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/run/erouter/dnsmasq.conf
+Restart=on-failure
+RestartSec=5

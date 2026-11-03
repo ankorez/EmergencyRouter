@@ -1,0 +1,25 @@
+table inet erouter
+delete table inet erouter
+
+table inet erouter {
+    chain input {
+        type filter hook input priority 0; policy drop;
+        iifname "lo" accept
+        ct state established,related accept
+        ct state invalid drop
+        icmp type echo-request accept
+        # depuis le LAN : DHCP, DNS, interface web, SSH
+        iifname "{{ bridge }}" udp dport { 53, 67, 5353 } accept
+        iifname "{{ bridge }}" tcp dport { 22, 53, {{ web_port }} } accept
+    }
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+        ct state established,related accept
+        iifname "{{ bridge }}" oifname "{{ uplink }}" accept
+        iifname "{{ bridge }}" oifname "{{ bridge }}" accept
+    }
+    chain postrouting {
+        type nat hook postrouting priority 100;
+        oifname "{{ uplink }}" masquerade
+    }
+}

@@ -1,0 +1,17 @@
+lan:
+  address: 192.168.1.1/24      # idéalement la même IP que ta box fibre
+  interface: eth0              # port Ethernet vers le switch
+  dhcp_start: 192.168.1.100
+  dhcp_end: 192.168.1.250
+  lease: 12h
+  dns: [1.1.1.1, 9.9.9.9]
+ap:
+  enabled: true
+  ssid: MaBox                  # même SSID que la box fibre
+  password: changeme123        # même mot de passe que la box fibre
+  country: FR
+  fallback_channel: 6
+uplink:
+  interface: wlan0             # Wi-Fi vers la 5G (se règle depuis l'interface web)
+web:
+  port: 80

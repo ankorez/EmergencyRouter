@@ -1,0 +1,8 @@
+[Unit]
+Description=EmergencyRouter hotspot (hostapd sur ap0)
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/hostapd /run/erouter/hostapd.conf
+Restart=on-failure
+RestartSec=5
