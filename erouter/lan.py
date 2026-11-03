@@ -59,9 +59,9 @@ def apply_dnsmasq(cfg):
 
 def apply_firewall(cfg):
     conf = _env.get_template("nftables.conf.j2").render(
-        bridge=BRIDGE, uplink=cfg["uplink"]["interface"], web_port=cfg["web"]["port"])
+        bridge=BRIDGE, uplink=cfg["uplink"]["interface"], web_port=int(cfg["web"]["port"]),
+        lan_net=str(ipaddress.ip_interface(cfg["lan"]["address"]).network))
     path = _write("nftables.conf", conf, 0o600)
-    system.run(["sysctl", "-qw", "net.ipv4.ip_forward=1"])
     system.run(["nft", "-f", path], check=True)
 
 

@@ -6,9 +6,15 @@ import subprocess
 
 
 def run(cmd, timeout=20, check=False):
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    """Exécute une commande (liste d'arguments, jamais de shell) avec un délai maximal."""
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p = subprocess.CompletedProcess(cmd, 124, "", f"{cmd[0]} : délai dépassé")
+    except FileNotFoundError:
+        p = subprocess.CompletedProcess(cmd, 127, "", f"{cmd[0]} : commande introuvable")
     if check and p.returncode != 0:
-        raise RuntimeError((p.stderr or p.stdout).strip() or f"{cmd[0]} a échoué")
+        raise RuntimeError((p.stderr or p.stdout).strip()[:300] or f"{cmd[0]} a échoué")
     return p
 
 
@@ -124,7 +130,7 @@ def connect(iface, ssid, password=None, hidden=False):
     if p.returncode != 0:
         if not existed:   # on ne supprime que le profil qu'on vient de créer (mauvais mot de passe)
             run(["nmcli", "connection", "delete", "id", ssid])
-        raise RuntimeError((p.stderr or p.stdout).strip() or "Connexion impossible")
+        raise RuntimeError((p.stderr or p.stdout).strip()[:300] or "Connexion impossible")
 
 
 def forget(ssid):

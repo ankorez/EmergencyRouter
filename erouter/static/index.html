@@ -3,79 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>EmergencyRouter</title>
-<style>
-:root{
-  --bg:#f4f5f8;--card:#fff;--text:#14171f;--muted:#6a7183;--line:#e4e7ee;
-  --accent:#3b6cff;--accent-text:#fff;--ok:#16a34a;--warn:#d97706;--bad:#dc2626;
-  --shadow:0 1px 2px rgba(20,23,31,.06),0 8px 24px rgba(20,23,31,.05);--r:16px;
-}
-@media (prefers-color-scheme:dark){:root{
-  --bg:#0d0f14;--card:#171a22;--text:#eceef4;--muted:#8d95a9;--line:#262a36;
-  --accent:#6b8cff;--accent-text:#0d0f14;--shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.3);}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-header{display:flex;align-items:center;justify-content:space-between;padding:18px max(16px,calc(50% - 540px))}
-.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;letter-spacing:-.01em}
-.logo{width:32px;height:32px;border-radius:10px;background:var(--accent);display:grid;place-items:center;color:var(--accent-text)}
-main{max-width:1080px;margin:0 auto;padding:0 16px 48px;display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(440px,100%),1fr))}
-.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:20px;box-shadow:var(--shadow)}
-.card.wide{grid-column:1/-1}
-h2{margin:0 0 14px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
-.hero{display:flex;align-items:center;gap:16px}
-.dot{width:14px;height:14px;border-radius:50%;background:var(--muted);flex:none;box-shadow:0 0 0 5px color-mix(in srgb,var(--muted) 20%,transparent)}
-.dot.ok{background:var(--ok);box-shadow:0 0 0 5px color-mix(in srgb,var(--ok) 22%,transparent)}
-.dot.warn{background:var(--warn);box-shadow:0 0 0 5px color-mix(in srgb,var(--warn) 22%,transparent)}
-.dot.bad{background:var(--bad);box-shadow:0 0 0 5px color-mix(in srgb,var(--bad) 22%,transparent)}
-.big{font-size:22px;font-weight:700;letter-spacing:-.01em}
-.muted{color:var(--muted)}
-.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;margin-top:16px}
-.kv span:nth-child(odd){color:var(--muted)}
-.kv span:nth-child(even){text-align:right;font-variant-numeric:tabular-nums}
-.banner{grid-column:1/-1;background:color-mix(in srgb,var(--warn) 14%,var(--card));border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));border-radius:var(--r);padding:12px 16px}
-button,input,select{font:inherit;color:inherit}
-button{border:1px solid var(--line);background:var(--card);border-radius:10px;padding:8px 14px;cursor:pointer}
-button:hover{border-color:var(--accent)}
-button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-text);font-weight:600}
-button.danger{color:var(--bad)}
-button:disabled{opacity:.5;cursor:default}
-input,select{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
-input:focus,select:focus{outline:2px solid color-mix(in srgb,var(--accent) 50%,transparent);border-color:var(--accent)}
-label{display:block;margin-bottom:12px;font-size:13px;color:var(--muted)}
-label input,label select{margin-top:4px;color:var(--text);font-size:15px}
-.row{display:flex;gap:10px;align-items:center}
-.row>*{flex:1}.row>button{flex:none}
-.list{display:grid;gap:2px}
-.item{display:flex;align-items:center;gap:12px;padding:10px 8px;border-radius:10px}
-.item:hover{background:var(--bg)}
-.item .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.bars{display:flex;gap:2px;align-items:flex-end;height:16px}
-.bars i{width:4px;background:var(--line);border-radius:1px}
-.bars i.on{background:var(--accent)}
-.tag{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--bg);border:1px solid var(--line);color:var(--muted)}
-.tag.ok{color:var(--ok);border-color:currentColor;background:transparent}
-table{width:100%;border-collapse:collapse}
-th{font-size:12px;color:var(--muted);text-align:left;font-weight:600;padding:6px 8px}
-td{padding:9px 8px;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
-dialog{border:1px solid var(--line);border-radius:var(--r);background:var(--card);color:var(--text);padding:22px;width:min(400px,92vw);box-shadow:var(--shadow)}
-dialog::backdrop{background:rgba(0,0,0,.45)}
-dialog h3{margin:0 0 14px}
-.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:10px 18px;border-radius:99px;opacity:0;transition:.25s;pointer-events:none}
-.toast.show{opacity:1}
-#login{min-height:100vh;display:grid;place-items:center;padding:16px}
-#login .card{width:min(380px,100%)}
-[hidden]{display:none!important}
-</style>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/app.js" defer></script>
 </head>
 <body>
 
 <section id="login" hidden>
   <form class="card" id="loginForm">
-    <div class="brand" style="margin-bottom:6px"><span class="logo">⇄</span> EmergencyRouter</div>
+    <div class="brand mb"><span class="logo">⇄</span> EmergencyRouter</div>
     <p class="muted" id="loginHint"></p>
-    <label>Mot de passe<input type="password" id="loginPw" autocomplete="current-password" required></label>
-    <button class="primary" style="width:100%">Continuer</button>
-    <p class="muted" id="loginErr" style="color:var(--bad);margin-bottom:0"></p>
+    <label>Mot de passe<input type="password" id="loginPw" autocomplete="current-password" maxlength="128" required></label>
+    <button class="primary full">Continuer</button>
+    <p class="error" id="loginErr"></p>
   </form>
 </section>
 
@@ -102,11 +44,11 @@ dialog h3{margin:0 0 14px}
   </section>
 
   <section class="card wide">
-    <div class="row" style="margin-bottom:6px">
-      <h2 style="margin:0;flex:1">Réseaux Wi-Fi (uplink 5G)</h2>
+    <div class="row head">
+      <h2>Réseaux Wi-Fi (uplink 5G)</h2>
       <button id="scanBtn">Actualiser</button>
     </div>
-    <p class="muted" style="margin-top:0;font-size:13px">« Actualiser » lance un nouveau scan : le hotspot peut se couper une ou deux secondes.</p>
+    <p class="muted small">« Actualiser » lance un nouveau scan : le hotspot peut se couper une ou deux secondes.</p>
     <div class="list" id="networks"><div class="muted">Chargement…</div></div>
   </section>
 
@@ -114,12 +56,12 @@ dialog h3{margin:0 0 14px}
     <h2>Réglages du hotspot</h2>
     <form id="apForm">
       <label>SSID (idem ta box fibre)<input id="apSsid" required maxlength="32"></label>
-      <label>Mot de passe Wi-Fi<input id="apPw" type="text" required minlength="8" maxlength="63"></label>
+      <label>Mot de passe Wi-Fi<input id="apPw" type="text" required minlength="8" maxlength="63" autocomplete="off"></label>
       <div class="row">
-        <label>Pays<input id="apCountry" maxlength="2" style="text-transform:uppercase"></label>
+        <label>Pays<input id="apCountry" maxlength="2" class="upper"></label>
         <label>Canal de repli<input id="apChan" type="number" min="1" max="13"></label>
       </div>
-      <label class="row" style="color:var(--text)"><input id="apOn" type="checkbox" style="width:auto;flex:none"> Hotspot activé</label>
+      <label class="check"><input id="apOn" type="checkbox"> Hotspot activé</label>
       <button class="primary">Enregistrer</button>
     </form>
   </section>
@@ -137,9 +79,17 @@ dialog h3{margin:0 0 14px}
     </form>
   </section>
 
+  <section class="card">
+    <h2>Carte SD</h2>
+    <div class="hero"><span class="dot" id="fsDot"></span>
+      <div><div class="big" id="fsTitle">…</div><div class="muted" id="fsSub"></div></div></div>
+    <p class="muted small" id="fsHelp"></p>
+    <button id="fsBtn" hidden></button>
+  </section>
+
   <section class="card wide">
     <h2>Appareils connectés</h2>
-    <table><thead><tr><th>Nom</th><th>IP</th><th>MAC</th><th>Type</th></tr></thead><tbody id="clients"></tbody></table>
+    <div class="table-wrap"><table><thead><tr><th>Nom</th><th>IP</th><th>MAC</th><th>Type</th></tr></thead><tbody id="clients"></tbody></table></div>
   </section>
 </main>
 </div>
@@ -147,135 +97,18 @@ dialog h3{margin:0 0 14px}
 <dialog id="joinDlg">
   <form id="joinForm" method="dialog">
     <h3 id="joinTitle"></h3>
-    <label id="joinPwWrap">Mot de passe<input id="joinPw" type="password" autocomplete="off"></label>
+    <label id="joinPwWrap">Mot de passe<input id="joinPw" type="password" autocomplete="off" maxlength="63"></label>
     <div class="row"><button type="button" id="joinCancel">Annuler</button><button class="primary" id="joinOk">Connecter</button></div>
   </form>
 </dialog>
 <dialog id="pwDlg">
   <form id="pwForm" method="dialog">
     <h3>Changer le mot de passe</h3>
-    <label>Actuel<input id="pwCur" type="password" required></label>
-    <label>Nouveau (8 min.)<input id="pwNew" type="password" required minlength="8"></label>
+    <label>Actuel<input id="pwCur" type="password" autocomplete="current-password" maxlength="128" required></label>
+    <label>Nouveau (8 min.)<input id="pwNew" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label>
     <div class="row"><button type="button" id="pwCancel">Annuler</button><button class="primary">Valider</button></div>
   </form>
 </dialog>
-<div class="toast" id="toast"></div>
-
-<script>
-const $ = s => document.querySelector(s);
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-let timers = [];
-
-async function api(path, body) {
-  const opt = body === undefined ? {} : {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)};
-  const r = await fetch(path, opt);
-  const j = await r.json().catch(() => ({}));
-  if (r.status === 401 && path !== "/api/login") { boot(); throw new Error("Session expirée"); }
-  if (!r.ok) throw new Error(j.error || "Erreur " + r.status);
-  return j;
-}
-function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 3200); }
-const kv = rows => rows.map(([k,v]) => `<span>${esc(k)}</span><span>${esc(v)}</span>`).join("");
-const fmtUp = s => s > 86400 ? Math.floor(s/86400)+" j "+Math.floor(s%86400/3600)+" h" : s > 3600 ? Math.floor(s/3600)+" h "+Math.floor(s%3600/60)+" min" : Math.floor(s/60)+" min";
-const bars = p => `<span class="bars">${[25,50,75,100].map((t,i) => `<i class="${p >= t-12 ? "on":""}" style="height:${6+i*3}px"></i>`).join("")}</span>`;
-
-async function boot() {
-  timers.forEach(clearInterval); timers = [];
-  const s = await fetch("/api/session").then(r => r.json());
-  $("#login").hidden = s.authenticated; $("#app").hidden = !s.authenticated;
-  if (!s.authenticated) {
-    $("#loginHint").textContent = s.setup_needed ? "Premier démarrage : choisis un mot de passe administrateur (8 caractères min.)." : "Connecte-toi pour administrer le routeur.";
-    $("#loginPw").autocomplete = s.setup_needed ? "new-password" : "current-password";
-    return;
-  }
-  await Promise.all([refresh(), loadSettings(), loadNetworks(false)]);
-  timers.push(setInterval(refresh, 5000), setInterval(loadNetworks.bind(null, false), 15000));
-}
-
-$("#loginForm").onsubmit = async e => {
-  e.preventDefault(); $("#loginErr").textContent = "";
-  try { await api("/api/login", {password: $("#loginPw").value}); $("#loginPw").value = ""; boot(); }
-  catch (err) { $("#loginErr").textContent = err.message; }
-};
-$("#logoutBtn").onclick = async () => { await api("/api/logout", {}); boot(); };
-
-async function refresh() {
-  const s = await api("/api/status");
-  const u = s.uplink;
-  $("#upDot").className = "dot " + (u.internet ? "ok" : u.connected ? "warn" : "bad");
-  $("#upTitle").textContent = u.internet ? "En ligne" : u.connected ? "Connecté, sans Internet" : "Hors ligne";
-  $("#upSub").textContent = u.connected ? u.ssid : "Choisis un réseau ci-dessous";
-  $("#upKv").innerHTML = u.connected ? kv([["Signal", (u.signal ?? "?") + " %"], ["Canal", `${u.channel} (${(u.freq/1000).toFixed(1)} GHz)`], ["IP", u.ip || "—"]]) : "";
-  const a = s.ap;
-  $("#apDot").className = "dot " + (!a.enabled ? "" : a.active ? "ok" : "bad");
-  $("#apTitle").textContent = !a.enabled ? "Désactivé" : a.active ? "Actif" : "Arrêté";
-  $("#apSub").textContent = a.enabled ? s.ap.ssid : "";
-  $("#apKv").innerHTML = kv([["Canal", a.channel], ["Routeur", s.lan.address], ["Appareils", s.lan.clients], ["Uptime", fmtUp(s.uptime)]]);
-  const w = $("#warnings"); w.hidden = !s.warnings.length; w.innerHTML = s.warnings.map(esc).join("<br>");
-  const c = await api("/api/clients");
-  $("#clients").innerHTML = c.clients.map(x => `<tr><td>${esc(x.hostname || "—")}</td><td>${esc(x.ip)}</td><td>${esc(x.mac)}</td><td><span class="tag">${x.wifi ? "Wi-Fi" : "Ethernet"}</span></td></tr>`).join("")
-    || `<tr><td colspan="4" class="muted">Aucun appareil</td></tr>`;
-}
-
-let saved = [];
-async function loadNetworks(rescan) {
-  const box = $("#networks");
-  if (rescan) { $("#scanBtn").disabled = true; $("#scanBtn").textContent = "Scan…"; }
-  try {
-    const d = await api("/api/wifi/scan" + (rescan ? "?rescan=1" : ""));
-    saved = d.saved;
-    box.innerHTML = d.networks.map(n => `<div class="item">${bars(n.signal)}<span class="name">${esc(n.ssid)}</span>
-      ${n.freq > 4000 ? '<span class="tag">5 GHz</span>' : '<span class="tag">2,4 GHz</span>'}
-      ${n.secured ? "🔒" : ""}
-      ${n.in_use ? '<span class="tag ok">connecté</span>' : `<button data-join="${esc(n.ssid)}" data-sec="${n.secured}">Connecter</button>`}
-      ${saved.includes(n.ssid) ? `<button class="danger" data-forget="${esc(n.ssid)}">Oublier</button>` : ""}</div>`).join("")
-      || '<div class="muted">Aucun réseau trouvé. Clique sur « Actualiser ».</div>';
-  } catch (e) { if (rescan) toast(e.message); }
-  $("#scanBtn").disabled = false; $("#scanBtn").textContent = "Actualiser";
-}
-$("#scanBtn").onclick = () => loadNetworks(true);
-$("#networks").onclick = async e => {
-  const j = e.target.dataset.join, f = e.target.dataset.forget;
-  if (f) { await api("/api/wifi/forget", {ssid: f}).catch(x => toast(x.message)); loadNetworks(false); }
-  if (j) {
-    const known = saved.includes(j), sec = e.target.dataset.sec === "true";
-    if (!sec || known) return join(j, null);
-    $("#joinTitle").textContent = j; $("#joinPw").value = ""; $("#joinDlg").showModal(); $("#joinDlg").dataset.ssid = j;
-  }
-};
-$("#joinCancel").onclick = () => $("#joinDlg").close();
-$("#joinForm").onsubmit = () => join($("#joinDlg").dataset.ssid, $("#joinPw").value);
-async function join(ssid, password) {
-  toast("Connexion à " + ssid + "…");
-  try { await api("/api/wifi/connect", {ssid, password}); toast("Connecté à " + ssid); }
-  catch (e) { toast(e.message); }
-  refresh(); loadNetworks(false);
-}
-
-async function loadSettings() {
-  const s = await api("/api/settings");
-  $("#apSsid").value = s.ap.ssid; $("#apPw").value = s.ap.password; $("#apCountry").value = s.ap.country;
-  $("#apChan").value = s.ap.fallback_channel; $("#apOn").checked = s.ap.enabled;
-  $("#lanAddr").value = s.lan.address; $("#lanStart").value = s.lan.dhcp_start; $("#lanEnd").value = s.lan.dhcp_end;
-  $("#lanDns").value = s.lan.dns.join(", ");
-}
-async function save(body) {
-  try { await api("/api/settings", body); toast("Enregistré, application en cours…"); setTimeout(refresh, 7000); }
-  catch (e) { toast(e.message); }
-}
-$("#apForm").onsubmit = e => { e.preventDefault(); save({ap: {ssid: $("#apSsid").value, password: $("#apPw").value,
-  country: $("#apCountry").value.toUpperCase(), fallback_channel: +$("#apChan").value, enabled: $("#apOn").checked}}); };
-$("#lanForm").onsubmit = e => { e.preventDefault(); save({lan: {address: $("#lanAddr").value, dhcp_start: $("#lanStart").value,
-  dhcp_end: $("#lanEnd").value, dns: $("#lanDns").value.split(",").map(s => s.trim()).filter(Boolean)}}); };
-
-$("#pwBtn").onclick = () => $("#pwDlg").showModal();
-$("#pwCancel").onclick = () => $("#pwDlg").close();
-$("#pwForm").onsubmit = async () => {
-  try { await api("/api/password", {current: $("#pwCur").value, new: $("#pwNew").value}); toast("Mot de passe modifié"); }
-  catch (e) { toast(e.message); }
-  $("#pwCur").value = $("#pwNew").value = "";
-};
-boot();
-</script>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

@@ -1,1 +1,1 @@
-network-manager hostapd dnsmasq-base nftables iw rfkill iproute2 iputils-ping python3 python3-flask python3-yaml python3-jinja2 wireless-regdb
+network-manager hostapd dnsmasq-base nftables iw rfkill iproute2 iputils-ping python3 python3-flask python3-yaml python3-jinja2 python3-waitress wireless-regdb

@@ -7,14 +7,18 @@ table inet erouter {
         iifname "lo" accept
         ct state established,related accept
         ct state invalid drop
-        icmp type echo-request accept
-        # depuis le LAN : DHCP, DNS, interface web, SSH
+        icmp type echo-request limit rate 10/second accept
+        # depuis le LAN uniquement : DHCP, DNS, mDNS, interface web ; SSH limité en débit
         iifname "{{ bridge }}" udp dport { 53, 67, 5353 } accept
-        iifname "{{ bridge }}" tcp dport { 22, 53, {{ web_port }} } accept
+        iifname "{{ bridge }}" tcp dport { 53, {{ web_port }} } accept
+        iifname "{{ bridge }}" tcp dport 22 ct state new limit rate 12/minute burst 5 packets accept
     }
     chain forward {
         type filter hook forward priority 0; policy drop;
         ct state established,related accept
+        ct state invalid drop
+        # anti-usurpation : un client du LAN ne peut émettre qu'avec une adresse de son réseau
+        iifname "{{ bridge }}" ip saddr != {{ lan_net }} drop
         iifname "{{ bridge }}" oifname "{{ uplink }}" accept
         iifname "{{ bridge }}" oifname "{{ bridge }}" accept
     }

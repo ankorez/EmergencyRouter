@@ -6,3 +6,12 @@ Type=simple
 ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/run/erouter/dnsmasq.conf
 Restart=on-failure
 RestartSec=5
+ProtectSystem=strict
+ReadWritePaths=/run/erouter
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes

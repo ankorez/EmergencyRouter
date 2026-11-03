@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Dépendances (paquets Debian/Ubuntu, comme sur le Pi)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-flask python3-yaml python3-jinja2 \
+            python3-waitress python3-pyflakes shellcheck dnsmasq-base nftables
+      - name: Analyse statique Python
+        run: python3 -m pyflakes erouter tests
+      - name: Tests
+        run: python3 -B -m unittest discover -s tests -v
+      - name: shellcheck
+        run: shellcheck -e SC2154 install.sh build-image.sh image/stage-erouter/prerun.sh image/stage-erouter/00-install/00-run.sh scripts/erouter-fs
+      - name: Syntaxe dnsmasq
+        run: |
+          python3 - <<'PY'
+          from jinja2 import Environment, FileSystemLoader
+          e = Environment(loader=FileSystemLoader("erouter/templates"))
+          open("/tmp/dnsmasq.conf", "w").write(e.get_template("dnsmasq.conf.j2").render(
+              bridge="br0", gateway="192.168.1.1", netmask="255.255.255.0", start="192.168.1.100",
+              end="192.168.1.250", lease="12h", dns=["1.1.1.1"], leases="/tmp/leases"))
+          PY
+          dnsmasq --test --conf-file=/tmp/dnsmasq.conf

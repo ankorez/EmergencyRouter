@@ -6,15 +6,22 @@ Wants=NetworkManager.service
 [Service]
 Type=simple
 WorkingDirectory=/opt/erouter
-ExecStart=/usr/bin/python3 -m erouter.agentd
+Environment=PYTHONPATH=/opt/erouter
+ExecStart=/usr/bin/python3 -s -B -m erouter.agentd
 Restart=always
 RestartSec=3
 RuntimeDirectory=erouter
 RuntimeDirectoryMode=0755
 RuntimeDirectoryPreserve=yes
+# Pas de ProtectSystem/ProtectHome/PrivateTmp : l'agent doit pouvoir remonter / en écriture pour enregistrer
+# la config (voir erouter/fs.py), ce qu'un espace de noms de montage privé compliquerait.
 NoNewPrivileges=yes
-ProtectHome=yes
-PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK AF_PACKET
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+UMask=0027
 
 [Install]
 WantedBy=multi-user.target

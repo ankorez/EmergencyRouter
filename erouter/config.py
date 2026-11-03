@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import secrets
+import shutil
 import threading
 
 import yaml
@@ -39,7 +40,7 @@ DEFAULTS = {
     },
 }
 
-_IFACE = re.compile(r"^[A-Za-z0-9_.-]{1,15}$")
+_IFACE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}$")   # jamais de « - » en tête : pas pris pour une option
 _LEASE = re.compile(r"^\d{1,5}[smhd]?$")
 _COUNTRY = re.compile(r"^[A-Z]{2}$")
 
@@ -98,8 +99,22 @@ def _validate(cfg):
         raise ValueError("Pays : code à 2 lettres majuscules (ex. FR)")
     if not 1 <= int(ap["fallback_channel"]) <= 13:
         raise ValueError("Canal de repli : 1 à 13")
-    if not 1 <= int(web["port"]) <= 65535:
+    if not 1 <= int(web["port"]) <= 65535 or int(web["port"]) in (22, 53, 67, 5353):
         raise ValueError("Port web invalide")
+    if not isinstance(web["password_hash"], str) or not isinstance(web["secret"], str) \
+            or len(web["password_hash"]) > 300 or len(web["secret"]) > 200:
+        raise ValueError("Champs web invalides")
+
+
+def sanitize(cfg):
+    """Ne garde que les clés connues (complétées par les défauts) : rien d'inattendu n'est jamais écrit."""
+    if not isinstance(cfg, dict):
+        raise ValueError("Configuration invalide")
+    out = {}
+    for section, defaults in DEFAULTS.items():
+        given = cfg.get(section) if isinstance(cfg.get(section), dict) else {}
+        out[section] = {k: copy.deepcopy(given.get(k, v)) for k, v in defaults.items()}
+    return out
 
 
 def _read():
@@ -114,13 +129,13 @@ def _read():
 
 
 def load():
-    """Lecture pour le service web (génère le secret de session au besoin)."""
+    """Lecture seule (service web). Le secret de session est créé par l'agent."""
     with _lock:
-        cfg = _read()
-        if not cfg["web"]["secret"]:
-            cfg["web"]["secret"] = secrets.token_hex(32)
-            _write(cfg)
-        return cfg
+        return _read()
+
+
+def new_secret():
+    return secrets.token_hex(32)
 
 
 _last_good = None
@@ -155,6 +170,11 @@ def _write(cfg):
         yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
         f.flush()
         os.fsync(f.fileno())          # la carte SD peut perdre le courant : on force l'écriture
+    try:                              # lisible par le service web (groupe erouter), jamais modifiable par lui
+        shutil.chown(tmp, user=0, group="erouter")
+        os.chmod(tmp, 0o640)
+    except (LookupError, PermissionError, OSError):
+        pass                          # poste de dev sans utilisateur erouter
     os.replace(tmp, CONFIG_PATH)
     dfd = os.open(d, os.O_RDONLY)
     try:

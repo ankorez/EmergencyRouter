@@ -48,25 +48,42 @@ Deux services, pour qu'une faille dans la page web ne donne pas root :
 
 | Service | Droits | Rôle |
 |---|---|---|
-| `erouter-agent` (`erouter/agent.py`, `agentd.py`, `lan.py`) | root | pont `br0`, `ap0`, hostapd, dnsmasq, nftables ; suit le canal de l'uplink ; surveille Internet |
-| `erouter-web` (`erouter/web.py`, `webd.py`, `static/index.html`) | utilisateur `erouter`, seul privilège : port 80 | API Flask + interface (sans dépendance externe, fonctionne hors-ligne) |
-| `erouter/rpc.py` | | socket local `/run/erouter/agent.sock` (0660 root:erouter) ; l'agent n'expose que quelques méthodes et valide chaque paramètre |
+| `erouter-agent` (`agent.py`, `agentd.py`, `lan.py`, `fs.py`) | root | pont `br0`, `ap0`, hostapd, dnsmasq, nftables ; suit le canal de l'uplink ; surveille Internet ; seul à écrire sur la carte |
+| `erouter-web` (`web.py`, `webd.py`, `static/`) | utilisateur `erouter`, système en lecture seule, seul droit : port 80 | API Flask + interface (sans dépendance externe, fonctionne hors-ligne), servie par waitress |
+| `rpc.py` | | socket local `/run/erouter/agent.sock` (0660 root:erouter) ; l'agent n'expose que 8 méthodes et valide chaque paramètre |
 
-L'agent **revalide toute la config à chaque lecture** (le fichier est modifiable par le service web) et garde la dernière config valide
-si le fichier est abîmé. Services supplémentaires : `erouter-hostapd`, `erouter-dnsmasq`.
+Services supplémentaires : `erouter-hostapd`, `erouter-dnsmasq`. Config : `/etc/erouter/config.yaml`
+(voir `config.example.yaml`), modifiable depuis l'interface. Détails et limites : [SECURITY.md](SECURITY.md).
 
-Config : `/etc/erouter/config.yaml` (voir `config.example.yaml`), modifiable depuis l'interface.
 Logs : `sudo journalctl -u erouter-agent -u erouter-web -u erouter-hostapd -u erouter-dnsmasq -n 80`
 
 ## Protection de la carte SD
 
-Un routeur de secours dort longtemps puis subit une coupure de courant : on évite donc d'écrire.
-- Journaux **en RAM** (`Storage=volatile`), baux DHCP dans `/run` (RAM), `/tmp` en tmpfs (défaut de Debian 13), pas de swap ni de mises à jour automatiques.
-- La config est écrite de façon **atomique** (fichier temporaire + `fsync` + renommage).
-- Ce n'est **pas** un système de fichiers strictement en lecture seule : un overlay perdrait au redémarrage la config et le
-  Wi-Fi 5G enregistré depuis l'interface, sauf à ajouter une partition de données séparée (piste future).
+Un routeur de secours dort longtemps puis subit une coupure de courant : une fois le démarrage terminé,
+l'agent **remonte la racine du système en lecture seule**. On peut donc couper le courant à tout moment : au rallumage,
+le routeur est directement opérationnel (hotspot, DHCP, Wi-Fi 5G enregistré).
+
+- Quand tu enregistres un réglage ou un Wi-Fi, l'agent repasse la carte en écriture **quelques secondes**, `fsync`, puis la reverrouille.
+  Ne coupe pas le courant pile à ce moment-là.
+- Journaux en RAM, baux DHCP en RAM, pas de swap, pas de mises à jour automatiques.
+- L'état est visible (et réglable) dans l'interface, carte « Carte SD », ou en ligne de commande :
+  `sudo erouter-fs status | lock | unlock`.
+- **Mettre à jour le système** : `sudo erouter-fs unlock`, `sudo apt update && sudo apt upgrade`, puis `sudo erouter-fs lock`.
+- **Sortie de secours** : si le verrouillage posait problème, retire la carte, ouvre `cmdline.txt` sur la partition de boot
+  (visible depuis un Mac) et ajoute `erouter.unlock` à la fin de la ligne : la carte reste alors en écriture.
+- L'image est livrée avec la protection activée ; une installation manuelle (`install.sh`) la laisse désactivée jusqu'à `sudo erouter-fs lock`.
+
+## Développement
+
+```
+make check      # pyflakes + shellcheck + tests (38 tests)
+make image      # image flashable (Docker)
+```
+La CI GitHub exécute les mêmes vérifications. Aucun test ne touche au système réel : l'agent est simulé, sauf la
+validation et l'écriture de la configuration.
 
 ## Feuille de route
 
-- [ ] Overlay en lecture seule avec partition de données séparée
+- [ ] HTTPS (certificat auto-signé) pour l'interface
+- [ ] Overlay en lecture seule avec partition de données séparée (si le verrouillage actuel ne suffit pas)
 - [ ] Image construite automatiquement par GitHub Actions

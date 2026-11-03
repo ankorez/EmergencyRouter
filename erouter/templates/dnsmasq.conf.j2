@@ -3,12 +3,16 @@ bind-interfaces
 except-interface=lo
 listen-address={{ gateway }}
 no-resolv
+no-hosts
+pid-file=
 {% for s in dns %}server={{ s }}
 {% endfor %}
 dhcp-range={{ start }},{{ end }},{{ netmask }},{{ lease }}
+dhcp-authoritative
 dhcp-option=option:router,{{ gateway }}
 dhcp-option=option:dns-server,{{ gateway }}
 dhcp-leasefile={{ leases }}
 domain-needed
 bogus-priv
+stop-dns-rebind
 cache-size=1000
