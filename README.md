@@ -10,6 +10,18 @@ Internet ← 5G ← wlan0 ┐
                   ap0 ┘  (hotspot, même SSID que la box)
 ```
 
+## Aperçu
+
+Captures réalisées avec des données fictives.
+
+![Tableau de bord, thème sombre](docs/screenshots/dashboard-dark.png)
+
+| Thème clair | Mobile | Premier démarrage |
+|---|---|---|
+| ![Tableau de bord, thème clair](docs/screenshots/dashboard-light.png) | ![Interface sur mobile](docs/screenshots/mobile.png) | ![Écran de premier démarrage](docs/screenshots/login.png) |
+
+L'interface suit le thème clair ou sombre de l'appareil et s'adapte aux petits écrans.
+
 ## Installation
 
 1. Flasher **Raspberry Pi OS Lite** (64 bits, Bookworm/Trixie) avec Raspberry Pi Imager (SSH activé, accès réseau pour l'installation).
