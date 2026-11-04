@@ -675,6 +675,12 @@ class WebTests(unittest.TestCase):
         self.assertNotIn(b"<script>", r.data, "aucun script en ligne")
         self.assertNotIn(b"style=", r.data, "aucun style en ligne")
 
+    def test_ssh_lives_in_a_dialog_opened_from_the_header(self):
+        html = self.c.get("/").data
+        self.assertIn(b'id="sshBtn"', html)
+        self.assertIn(b'<dialog id="sshDlg">', html)
+        self.assertNotIn("Accès SSH</h2>".encode(), html, "plus de carte SSH dans la grille")
+
     def test_static_whitelist(self):
         self.assertEqual(self.c.get("/static/app.js").status_code, 200)
         self.assertEqual(self.c.get("/static/app.css").status_code, 200)

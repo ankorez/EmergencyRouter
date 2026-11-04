@@ -24,7 +24,7 @@
 <div id="app" hidden>
 <header>
   <div class="brand"><span class="logo">⇄</span> EmergencyRouter</div>
-  <div class="row"><button id="pwBtn">Mot de passe</button><button id="logoutBtn">Déconnexion</button></div>
+  <div class="row"><button id="sshBtn">SSH</button><button id="pwBtn">Mot de passe</button><button id="logoutBtn">Déconnexion</button></div>
 </header>
 <main>
   <div class="banner" id="warnings" hidden></div>
@@ -79,19 +79,6 @@
     </form>
   </section>
 
-  <section class="card">
-    <h2>Accès SSH</h2>
-    <div class="hero"><span class="dot" id="sshDot"></span>
-      <div><div class="big" id="sshTitle">…</div><div class="muted" id="sshSub"></div></div></div>
-    <form id="sshForm">
-      <label>Utilisateur<input id="sshUser" readonly></label>
-      <label>Mot de passe SSH<input id="sshPw" type="password" autocomplete="new-password" minlength="12" maxlength="64"></label>
-      <label class="check"><input id="sshOn" type="checkbox"> Activer le SSH</label>
-      <button class="primary">Enregistrer</button>
-    </form>
-    <p class="muted small" id="sshHelp"></p>
-  </section>
-
   <section class="card wide">
     <h2>Appareils connectés</h2>
     <div class="table-wrap"><table><thead><tr><th>Nom</th><th>IP</th><th>MAC</th><th>Type</th></tr></thead><tbody id="clients"></tbody></table></div>
@@ -116,6 +103,18 @@
     <label>Actuel<input id="pwCur" type="password" autocomplete="current-password" maxlength="128" required></label>
     <label>Nouveau (8 min.)<input id="pwNew" type="password" autocomplete="new-password" minlength="8" maxlength="128" required></label>
     <div class="row"><button type="button" id="pwCancel">Annuler</button><button class="primary">Valider</button></div>
+  </form>
+</dialog>
+<dialog id="sshDlg">
+  <form id="sshForm">
+    <h3>Accès SSH</h3>
+    <p class="muted small" id="sshStatus"></p>
+    <label>Utilisateur<input id="sshUser" readonly></label>
+    <label>Mot de passe SSH<input id="sshPw" type="password" autocomplete="new-password" minlength="12" maxlength="64"></label>
+    <label class="check"><input id="sshOn" type="checkbox"> Activer le SSH</label>
+    <p class="muted small" id="sshHelp"></p>
+    <p class="error" id="sshErr"></p>
+    <div class="row"><button type="button" id="sshCancel">Annuler</button><button class="primary">Enregistrer</button></div>
   </form>
 </dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>

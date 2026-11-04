@@ -20,6 +20,10 @@ Captures réalisées avec des données fictives.
 |---|---|---|
 | ![Tableau de bord, thème clair](docs/screenshots/dashboard-light.png) | ![Interface sur mobile](docs/screenshots/mobile.png) | ![Écran de premier démarrage](docs/screenshots/login.png) |
 
+Le bouton « SSH » de l'en-tête ouvre une fenêtre pour activer le SSH et choisir son mot de passe :
+
+![Fenêtre d'accès SSH](docs/screenshots/ssh-dialog.png)
+
 L'interface suit le thème clair ou sombre de l'appareil et s'adapte aux petits écrans.
 
 ## Installation
@@ -43,8 +47,8 @@ le **système en lecture seule** : on peut couper le courant à tout moment.
 
 ### Accès SSH
 
-Éteint par défaut. Pour l'activer, dans l'interface, carte **« Accès SSH »** : choisis un mot de passe (12 caractères
-minimum), coche « Activer le SSH » et enregistre. Puis :
+Éteint par défaut. Pour l'activer, dans l'interface, bouton **« SSH »** en haut de la page : choisis un mot de passe
+(12 caractères minimum), coche « Activer le SSH » et enregistre. Puis :
 
 ```
 ssh pi@192.168.1.1        # depuis le hotspot ERouter-Setup ou le câble Ethernet du Pi

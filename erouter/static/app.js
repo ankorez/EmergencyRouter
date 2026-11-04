@@ -45,23 +45,29 @@ $("#loginForm").onsubmit = async e => {
 };
 $("#logoutBtn").onclick = async () => { await api("/api/logout", {}); boot(); };
 
-let sshFormReady = false;
+let ssh = null;
 function renderSsh(x) {
   if (!x) return;
-  $("#sshDot").className = "dot " + (x.active ? "ok" : x.enabled ? "bad" : "");
-  $("#sshTitle").textContent = x.active ? "Activé" : x.enabled ? "Arrêté" : "Désactivé";
-  $("#sshSub").textContent = x.active ? `Utilisateur ${x.user}` : "";
-  $("#sshHelp").textContent = `Joignable uniquement depuis le hotspot ou le câble Ethernet du routeur : ssh ${x.user}@192.168.1.1. ` +
-    "Changer le mot de passe écrit brièvement sur la carte (une seconde).";
-  $("#sshPw").placeholder = x.password_set ? "Laisser vide pour ne pas le changer" : "Choisis un mot de passe (12 caractères min.)";
-  if (!sshFormReady) { $("#sshUser").value = x.user; $("#sshOn").checked = x.enabled; sshFormReady = true; }
+  ssh = x;
+  $("#sshBtn").textContent = x.active ? "SSH : activé" : x.enabled ? "SSH : arrêté" : "SSH : éteint";
 }
+$("#sshBtn").onclick = () => {
+  if (!ssh) return;
+  $("#sshUser").value = ssh.user; $("#sshOn").checked = ssh.enabled; $("#sshPw").value = ""; $("#sshErr").textContent = "";
+  $("#sshStatus").textContent = ssh.active ? "Le serveur SSH est en marche."
+    : ssh.enabled ? "Activé, mais le serveur n'a pas pu démarrer." : "Le serveur SSH est éteint.";
+  $("#sshPw").placeholder = ssh.password_set ? "Laisser vide pour ne pas le changer" : "Choisis un mot de passe (12 caractères min.)";
+  $("#sshHelp").textContent = `Joignable uniquement depuis le hotspot ou le câble Ethernet du routeur : ssh ${ssh.user}@192.168.1.1. ` +
+    "Changer le mot de passe écrit brièvement sur la carte (une seconde).";
+  $("#sshDlg").showModal();
+};
+$("#sshCancel").onclick = () => $("#sshDlg").close();
 $("#sshForm").onsubmit = async e => {
-  e.preventDefault();
+  e.preventDefault(); $("#sshErr").textContent = "";
   try {
     const r = await api("/api/ssh", {enabled: $("#sshOn").checked, password: $("#sshPw").value});
-    $("#sshPw").value = ""; toast(r.enabled ? "SSH activé" : "SSH désactivé"); setTimeout(refresh, 3000);
-  } catch (err) { toast(err.message); }
+    $("#sshDlg").close(); toast(r.enabled ? "SSH activé" : "SSH désactivé"); setTimeout(refresh, 3000);
+  } catch (err) { $("#sshErr").textContent = err.message; }   // dans la fenêtre : un toast serait caché derrière elle
 };
 function renderBuild(b) {
   if (!b) return;
