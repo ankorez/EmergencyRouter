@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 STATIC = os.path.join(os.path.dirname(__file__), "..", "..", "erouter", "static")
 LOG = []
-STATE = {"speed_polls": 0, "speed_started": False}
+STATE = {"speed_polls": 0, "speed_started": False, "connected": None}
 LOCK = threading.Lock()
 
 
@@ -102,6 +102,9 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/api/diagnostic", "/api/backup"):
             return self._send("{}", "application/octet-stream")
         data = api(self.scenario).get(path)
+        if path == "/api/status" and STATE["connected"]:               # la connexion demandée est (enfin) établie
+            data = json.loads(json.dumps(data))
+            data["uplink"]["ssid"] = STATE["connected"]
         return self._send(data) if data is not None else self._send({"error": "inconnu"}, code=404)
 
     def do_POST(self):
@@ -112,6 +115,12 @@ class Handler(BaseHTTPRequestHandler):
             LOG.append({"path": path, "body": body})
             if path == "/api/speedtest":
                 STATE["speed_started"], STATE["speed_polls"] = True, 0
+            if path == "/api/wifi/connect":
+                STATE["connected"] = body["ssid"]
+        if path == "/api/wifi/connect" and self.scenario == "wizard-cut":
+            self.close_connection = True                                # le Wi-Fi du routeur se coupe : aucune réponse n'arrive
+            self.connection.close()
+            return
         if path == "/api/speedtest":
             return self._send({"running": True, "stage": "latence", "result": None, "history": []})
         return self._send({"ok": True, "enabled": False, "relogin": False})

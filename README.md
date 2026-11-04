@@ -42,8 +42,10 @@ le **système en lecture seule** : on peut couper le courant à tout moment.
    `shasum -a 256 -c SHA256SUMS`.
 2. Au premier démarrage, le hotspot **`ERouter-Setup`** (mot de passe `erouter-setup`) sert à la configuration.
 3. Ouvre **https://192.168.1.1/** (ou `https://erouter.local/`) : le navigateur avertit que le certificat est auto-signé
-   (normal : compare l'empreinte SHA-256 affichée en bas de la page), choisis le mot de passe admin, puis règle le vrai
-   SSID/mot de passe du hotspot et le Wi-Fi de la 5G.
+   (normal : compare l'empreinte SHA-256 affichée en bas de la page), choisis le mot de passe admin, puis suis l'assistant :
+   Wi-Fi de la 5G d'abord (garde l'écran « Partage de connexion » ouvert sur le téléphone), vrai SSID/mot de passe du
+   hotspot ensuite. **Après l'assistant, ton appareil est déconnecté** : le hotspot a changé de nom, reconnecte-toi.
+   Une réinstallation (reflash) efface le Wi-Fi de la 5G enregistré : il faut le choisir de nouveau.
 
 ### Accès SSH
 
@@ -82,7 +84,7 @@ Sans l'image il n'y a pas de partition de données séparée : la protection de 
 | **QR code du Wi-Fi** | Outils | connecte un téléphone au hotspot en scannant | — |
 | **Diagnostic** | Outils | un fichier avec l'état, la configuration **sans mot de passe**, le réseau et les journaux, à joindre à une demande d'aide | relis-le : il contient des noms de réseaux, des adresses IP et MAC |
 | **Sauvegarde / restauration** | Outils | exporte et réimporte la configuration (hotspot, forfait, plafonds, mot de passe admin) | le fichier contient le mot de passe du hotspot : garde-le en lieu sûr ; le Wi-Fi 5G et le SSH ne sont pas inclus |
-| **Assistant de premier démarrage** | s'ouvre seul | 3 étapes : hotspot, Wi-Fi de la 5G, terminé | — |
+| **Assistant de premier démarrage** | s'ouvre seul | 3 étapes : Wi-Fi de la 5G, hotspot, terminé. **Le hotspot n'est appliqué qu'à la toute fin** : l'assistant est utilisé *par* ce hotspot, le changer coupe la connexion (il te dit sur quel Wi-Fi te reconnecter) | — |
 | **Chien de garde** | automatique | le Pi redémarre seul s'il se fige ; l'agent est relancé s'il ne répond plus | — |
 
 ## Limites à connaître

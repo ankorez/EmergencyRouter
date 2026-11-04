@@ -16,7 +16,7 @@ SHOTS = [
     ("mobile.png", "dashboard-shot", 500, 3900, True),
     ("ssh-dialog.png", "ssh-shot", 900, 760, True),
     ("tools-dialog.png", "tools-shot", 900, 760, True),
-    ("wizard.png", "wizard-shot", 900, 720, True),
+    ("wizard.png", "wizard-shot", 900, 760, True),
 ]
 PORT = 8791
 

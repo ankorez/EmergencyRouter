@@ -4,9 +4,17 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "
 let timers = [];
 let saved = [];
 
-async function api(path, body) {
+async function api(path, body, timeoutMs = 25000) {
   const opt = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)};
-  const r = await fetch(path, opt);
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);      // jamais de requête suspendue indéfiniment
+  let r;
+  try { r = await fetch(path, {...opt, signal: ctl.signal}); }
+  catch (e) {
+    const err = new Error("Le routeur ne répond pas (le Wi-Fi s'est peut-être coupé quelques secondes).");
+    err.network = true;                                          // distingue une coupure d'une erreur renvoyée par le routeur
+    throw err;
+  } finally { clearTimeout(timer); }
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 && path !== "/api/login") { boot(); throw new Error("Session expirée"); }
   if (!r.ok) throw new Error(j.error || "Erreur " + r.status);
