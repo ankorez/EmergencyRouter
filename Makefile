@@ -5,7 +5,7 @@ test:   ## tests unitaires
 
 lint:   ## analyse statique Python + shellcheck
 	python3 -m pyflakes erouter tests
-	shellcheck -S warning -e SC2154 install.sh build-image.sh image/stage-erouter/prerun.sh image/stage-erouter/00-install/00-run.sh image/postprocess.sh scripts/erouter-fs scripts/erouter-data tests/integration/check.sh
+	shellcheck -S warning -e SC2154 install.sh build-image.sh image/stage-erouter/prerun.sh image/stage-erouter/00-install/00-run.sh image/postprocess.sh scripts/erouter-fs scripts/erouter-data tests/integration/check.sh tests/integration/firewall.sh
 
 check: lint test
 

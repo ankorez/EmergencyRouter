@@ -14,7 +14,7 @@ section "Installation des outils"
 apt-get update -qq >/dev/null 2>&1
 apt-get install -y -qq --no-install-recommends python3 python3-flask python3-yaml python3-jinja2 python3-gunicorn \
   openssl nftables dnsmasq-base hostapd systemd shellcheck ca-certificates curl e2fsprogs fdisk mtools dosfstools \
-  mount util-linux xz-utils python3-pyflakes procps openssh-client openssh-server >/dev/null 2>&1 || { echo "apt a échoué"; exit 1; }
+  mount util-linux xz-utils python3-pyflakes procps iproute2 openssh-client openssh-server >/dev/null 2>&1 || { echo "apt a échoué"; exit 1; }
 python3 -c "from importlib.metadata import version as v; print('python', __import__('sys').version.split()[0], '| flask', v('flask'), '| gunicorn', v('gunicorn'), '|', end=' ')"
 openssl version
 id erouter >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin erouter
@@ -40,8 +40,13 @@ mkdir -p /opt/erouter && cp -r /work/erouter /opt/erouter/ && touch /usr/local/s
 verify=$(systemd-analyze verify /work/systemd/erouter-*.service 2>&1 | grep -v "^$")
 [ -z "$verify" ] && ok "systemd-analyze verify (5 unités)" || { bad "systemd-analyze verify"; echo "$verify" | sed 's/^/    /'; }
 sc=$(shellcheck -S warning -e SC2154 install.sh build-image.sh scripts/erouter-fs scripts/erouter-data image/postprocess.sh \
-  image/stage-erouter/prerun.sh image/stage-erouter/00-install/00-run.sh tests/integration/check.sh 2>&1)
+  image/stage-erouter/prerun.sh image/stage-erouter/00-install/00-run.sh tests/integration/check.sh tests/integration/firewall.sh 2>&1)
 [ -z "$sc" ] && ok "shellcheck" || { bad "shellcheck"; echo "$sc" | head -30 | sed 's/^/    /'; }
+
+section "Pare-feu : vrai trafic entre le LAN, le routeur et « Internet »"
+fw=$(bash /work/tests/integration/firewall.sh /work 2>&1); fw_rc=$?
+echo "$fw" | grep -E "✔|✘|^  --|règles"
+[ "$fw_rc" -eq 0 ] || FAIL=$((FAIL + fw_rc))
 
 section "Partition de données (erouter-data) sur de vrais disques"
 DEFAULT=/tmp/default.yaml; echo "lan: {}" > $DEFAULT
