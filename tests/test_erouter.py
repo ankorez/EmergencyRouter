@@ -1032,12 +1032,6 @@ class LanInterfaceTests(unittest.TestCase):
         lan.apply_interface(self.cfg)
         self.assertNotIn(["ip", "-4", "addr", "flush", "dev", "eth0"], self.cmds)
 
-    def test_old_bridge_and_hotspot_interface_are_removed_on_upgrade(self):
-        self.existing |= {"br0", "ap0"}
-        lan.apply_interface(self.cfg)
-        self.assertIn(["ip", "link", "del", "br0"], self.cmds)
-        self.assertIn(["iw", "dev", "ap0", "del"], self.cmds)
-
     def test_missing_interface_is_reported(self):
         self.existing = set()
         with self.assertRaises(RuntimeError):

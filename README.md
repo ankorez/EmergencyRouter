@@ -143,7 +143,7 @@ Si le certificat ne peut pas être créé, l'interface reste servie en HTTP (ave
 ## Développement
 
 ```
-make check          # pyflakes + shellcheck + tests unitaires (120)
+make check          # pyflakes + shellcheck + tests unitaires (119)
 make ui-test        # l'interface jouée dans un vrai Chrome sans écran (6 scénarios : tableau de bord, outils, assistant, test de débit, économies, mobile)
 make integration    # vérifications dans un vrai Debian 13 (Docker, conteneur privilégié) :
                     # vrais disques pour la partition de données (saine, corrompue, détruite), post-traitement d'image,

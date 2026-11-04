@@ -36,23 +36,11 @@ def lan_if(cfg):
     return cfg["lan"]["interface"]
 
 
-def _remove_legacy_hotspot(eth):
-    """Mise à jour d'une ancienne version : le pont br0 (Ethernet + hotspot interne) et l'interface ap0 n'existent plus."""
-    if system.iface_exists("br0"):
-        system.run(["ip", "link", "set", eth, "nomaster"])
-        system.run(["ip", "link", "del", "br0"])
-        log.info("ancien pont br0 supprimé")
-    if system.iface_exists("ap0"):
-        system.run(["iw", "dev", "ap0", "del"])
-        log.info("ancienne interface du hotspot (ap0) supprimée")
-
-
 def apply_interface(cfg):
     """Donne l'adresse du routeur au port Ethernet et le monte."""
     eth = lan_if(cfg)
     if not system.iface_exists(eth):
         raise RuntimeError(f"interface réseau local « {eth} » introuvable")
-    _remove_legacy_hotspot(eth)
     wanted = str(ipaddress.ip_interface(cfg["lan"]["address"]))
     if system.iface_ip(eth) != wanted:
         system.run(["ip", "-4", "addr", "flush", "dev", eth])
