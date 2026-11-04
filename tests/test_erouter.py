@@ -7,7 +7,6 @@ import copy
 import datetime
 import gzip
 import http.client
-import importlib.util
 import json
 import os
 import pwd
@@ -27,7 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from jinja2 import Environment, FileSystemLoader  # noqa: E402
 
-from erouter import agent, agentd, config, diagnostic, fs, history, lan, qr, rpc, speedtest, sqm, system, tls, usage, wd, web, webd  # noqa: E402
+from erouter import agent, agentd, config, diagnostic, fs, history, lan, rpc, speedtest, sqm, system, tls, usage, wd, web, webd  # noqa: E402
 
 TEMPLATES = os.path.join(os.path.dirname(__file__), "..", "erouter", "templates")
 
@@ -46,14 +45,10 @@ class ConfigTests(unittest.TestCase):
         cases = {
             "bail": lambda c: c["lan"].__setitem__("lease", "12h\ndhcp-script=/bin/sh"),
             "dns": lambda c: c["lan"].__setitem__("dns", ["1.1.1.1\nconf-file=/x"]),
-            "ssid": lambda c: c["ap"].__setitem__("ssid", "a\nwpa=0"),
-            "mot de passe court": lambda c: c["ap"].__setitem__("password", "short"),
-            "pays minuscule": lambda c: c["ap"].__setitem__("country", "fr"),
             "interface": lambda c: c["lan"].__setitem__("interface", "eth0; reboot"),
             "interface option": lambda c: c["uplink"].__setitem__("interface", "-h"),
             "adresse réseau": lambda c: c["lan"].__setitem__("address", "10.0.0.0/24"),
             "dhcp hors réseau": lambda c: c["lan"].__setitem__("dhcp_start", "10.9.9.9"),
-            "canal": lambda c: c["ap"].__setitem__("fallback_channel", 40),
             "port SSH": lambda c: c["web"].__setitem__("port", 22),
             "ports identiques": lambda c: c["web"].__setitem__("http_port", 443),
             "port de redirection réservé": lambda c: c["web"].__setitem__("http_port", 53),
@@ -137,7 +132,7 @@ class TemplateTests(unittest.TestCase):
         return text[start:text.index("\n    }\n", start)]
 
     def render_fw(self, **kw):
-        args = dict(bridge="br0", uplink="wlan0", web_ports=[443, 80], lan_net="192.168.1.0/24", limits=[])
+        args = dict(lan_if="eth0", uplink="wlan0", web_ports=[443, 80], lan_net="192.168.1.0/24", limits=[])
         args.update(kw)
         return self.env.get_template("nftables.conf.j2").render(**args)
 
@@ -172,19 +167,15 @@ class TemplateTests(unittest.TestCase):
         self.assertNotIn("ip saddr 192.168.1.102", fwd, "pas de plafond montant s'il n'est pas demandé")
         self.assertLess(fwd.index("limit rate over"), fwd.index("@usage_up"), "les paquets jetés par un plafond ne sont pas comptés")
 
-    def test_dnsmasq_and_hostapd(self):
-        d = self.env.get_template("dnsmasq.conf.j2").render(bridge="br0", gateway="g", netmask="n", start="a", end="b",
+    def test_dnsmasq_template(self):
+        d = self.env.get_template("dnsmasq.conf.j2").render(lan_if="eth0", gateway="g", netmask="n", start="a", end="b",
                                                            lease="12h", dns=["1.1.1.1"], leases="/x", blocklist=None)
         self.assertIn("stop-dns-rebind", d)
         self.assertNotIn("addn-hosts", d)
-        blocked = self.env.get_template("dnsmasq.conf.j2").render(bridge="br0", gateway="g", netmask="n", start="a", end="b",
+        blocked = self.env.get_template("dnsmasq.conf.j2").render(lan_if="eth0", gateway="g", netmask="n", start="a", end="b",
                                                                   lease="12h", dns=["1.1.1.1"], leases="/x", blocklist="/run/erouter/blocklist.hosts")
         self.assertIn("addn-hosts=/run/erouter/blocklist.hosts", blocked)
         self.assertIn("pid-file=", d)
-        h = self.env.get_template("hostapd.conf.j2").render(iface="ap0", bridge="br0", ssid="S", password="p",
-                                                           country="FR", channel=6, hw_mode="g")
-        self.assertIn("wpa=2", h)
-        self.assertIn("rsn_pairwise=CCMP", h)
 
 
 class SystemTests(unittest.TestCase):
@@ -192,8 +183,6 @@ class SystemTests(unittest.TestCase):
         self.assertEqual(system.freq_to_channel(2437), 6)
         self.assertEqual(system.freq_to_channel(5180), 36)
         self.assertEqual(system.freq_to_channel(2484), 14)
-        self.assertTrue(system.is_dfs(5500))
-        self.assertFalse(system.is_dfs(5180))
 
     def test_split_nmcli_handles_escaped_colons(self):
         self.assertEqual(system._split_nmcli(r"*:Wi\:Fi:80:WPA2:2437 MHz"), ["*", "Wi:Fi", "80", "WPA2", "2437 MHz"])
@@ -789,27 +778,14 @@ class AgentSqmSyncTests(unittest.TestCase):
         self.assertEqual(agent._sqm_error, "Unknown qdisc cake")
 
 
-class QrAndDiagnosticTests(unittest.TestCase):
-    def test_wifi_payload_escapes_special_characters(self):
-        self.assertEqual(qr.wifi_payload("MaBox", "simple-12345"), "WIFI:T:WPA;S:MaBox;P:simple-12345;;")
-        self.assertEqual(qr.wifi_payload("Ma;Box", 'p:a\\ss,"x'), 'WIFI:T:WPA;S:Ma\\;Box;P:p\\:a\\\\ss\\,\\"x;;')
-
-    @unittest.skipUnless(importlib.util.find_spec("qrcode"), "python3-qrcode requis")
-    def test_svg_is_a_vector_image_without_script(self):
-        out = qr.svg(qr.wifi_payload("MaBox", "motdepasse-123"))
-        self.assertTrue(out.lstrip().startswith(b"<?xml") or b"<svg" in out[:200])
-        self.assertNotIn(b"<script", out)
-        self.assertNotIn(b"onload", out)
-        self.assertRegex(out.decode(), r'<svg[^>]*><rect width="[0-9.]+" height="[0-9.]+" fill="#ffffff"/><path',
-                         "fond blanc embarqué, dessiné avant les modules noirs")
-
+class DiagnosticTests(unittest.TestCase):
     def test_config_dump_hides_every_secret(self):
         cfg = config.sanitize(config.DEFAULTS)
-        cfg["ap"]["password"], cfg["web"]["password_hash"], cfg["web"]["secret"] = "Mot-de-passe-wifi-42", "scrypt:abc123hash", "s" * 64
+        cfg["web"]["password_hash"], cfg["web"]["secret"] = "scrypt:abc123hash", "s" * 64
         dumped = json.dumps(diagnostic.redact_config(cfg))
-        for secret in ("Mot-de-passe-wifi-42", "scrypt:abc123hash", "s" * 64):
+        for secret in ("scrypt:abc123hash", "s" * 64):
             self.assertNotIn(secret, dumped)
-        self.assertEqual(cfg["ap"]["password"], "Mot-de-passe-wifi-42", "l'original n'est pas modifié")
+        self.assertEqual(cfg["web"]["secret"], "s" * 64, "l'original n'est pas modifié")
 
     def test_command_output_is_scrubbed(self):
         text = "wpa_passphrase=Mot-de-passe-wifi-42\nligne normale\nreseau Mot-de-passe-wifi-42 connecté\npsk=abcdef"
@@ -820,13 +796,13 @@ class QrAndDiagnosticTests(unittest.TestCase):
 
     def test_collect_contains_no_password_even_if_a_command_leaks_it(self):
         cfg = config.sanitize(config.DEFAULTS)
-        cfg["ap"]["password"] = "Mot-de-passe-wifi-42"
+        cfg["web"]["secret"] = "Mot-de-passe-wifi-42"
         leaky = mock.Mock(returncode=0, stdout="ssid=MaBox pass=Mot-de-passe-wifi-42\n", stderr="")
         with mock.patch.object(diagnostic.system, "run", return_value=leaky):
             text = diagnostic.collect(cfg, {"uplink": {"ssid": "Partage"}}, {"version": "0.1.0"})
         self.assertNotIn("Mot-de-passe-wifi-42", text)
         self.assertIn("Version :", text)
-        self.assertIn("password: '***'", text)
+        self.assertIn("secret: '***'", text)
 
 
 class LanSavingsTests(unittest.TestCase):
@@ -837,7 +813,7 @@ class LanSavingsTests(unittest.TestCase):
     def test_limits_follow_the_current_dhcp_address_of_each_device(self):
         self.cfg["savings"]["limits"] = [{"mac": "aa:bb:cc:dd:ee:01", "down_mbit": 5, "up_mbit": 2},
                                          {"mac": "aa:bb:cc:dd:ee:09", "down_mbit": 1, "up_mbit": 1}]
-        clients = [{"mac": "aa:bb:cc:dd:ee:01", "ip": "192.168.1.120", "hostname": "x", "wifi": True}]
+        clients = [{"mac": "aa:bb:cc:dd:ee:01", "ip": "192.168.1.120", "hostname": "x"}]
         with mock.patch.object(lan.system, "clients", return_value=clients):
             rules = lan.limit_rules(self.cfg)
         self.assertEqual(rules, [{"mac": "aa:bb:cc:dd:ee:01", "ip": "192.168.1.120", "up_kbytes": 250, "down_kbytes": 625}],
@@ -884,7 +860,7 @@ class AgentRecordTests(unittest.TestCase):
         self.bytes = (1000, 500)
         for p in (mock.patch.object(agent.system, "iface_bytes", lambda i: self.bytes),
                   mock.patch.object(agent.usage, "read_counters", lambda name: self.counters[name]),
-                  mock.patch.object(agent.system, "clients", lambda f: [{"mac": "aa:aa:aa:aa:aa:01", "ip": "10.1.0.50", "hostname": "portable", "wifi": True}])):
+                  mock.patch.object(agent.system, "clients", lambda f: [{"mac": "aa:aa:aa:aa:aa:01", "ip": "10.1.0.50", "hostname": "portable"}])):
             p.start()
             self.addCleanup(p.stop)
 
@@ -914,10 +890,10 @@ class PowerSaveParsingTests(unittest.TestCase):
 
 
 class PowerSaveTests(unittest.TestCase):
-    """Hotspot + client sur une seule puce : l'économie d'énergie rend le hotspot invisible aux nouveaux appareils."""
+    """L'économie d'énergie endort la radio et rend la liaison avec le téléphone instable."""
 
     def setUp(self):
-        self.state = {"wlan0": True, "ap0": True}
+        self.state = {"wlan0": True}
         self.sets = []
         agent._last_ps_check = 0.0
         for p in (mock.patch.object(agent.system, "iface_exists", lambda i: i in self.state),
@@ -926,9 +902,9 @@ class PowerSaveTests(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
 
-    def test_turned_off_on_both_the_client_and_the_hotspot_interface(self):
+    def test_turned_off_on_the_wifi_interface(self):
         agent._sync_power_save("wlan0")
-        self.assertEqual(sorted(self.sets), [("ap0", False), ("wlan0", False)])
+        self.assertEqual(sorted(self.sets), [("wlan0", False)])
 
     def test_nothing_to_do_when_already_off_or_interface_missing(self):
         self.state = {"wlan0": False}
@@ -939,10 +915,10 @@ class PowerSaveTests(unittest.TestCase):
         agent._sync_power_save("wlan0")
         self.state["wlan0"] = True                  # NetworkManager l'a remise après une reconnexion
         agent._sync_power_save("wlan0")
-        self.assertEqual(len(self.sets), 2, "trop tôt : pas de nouvelle vérification")
+        self.assertEqual(len(self.sets), 1, "trop tôt : pas de nouvelle vérification")
         agent._last_ps_check -= agent.POWER_SAVE_EVERY + 1
         agent._sync_power_save("wlan0")
-        self.assertIn(("wlan0", False), self.sets[2:])
+        self.assertEqual(len(self.sets), 2)
 
     def test_a_refusal_is_logged_not_raised(self):
         with mock.patch.object(agent.system, "set_power_save", return_value=False), self.assertLogs("erouter.agent", "WARNING"):
@@ -1032,48 +1008,51 @@ class AgentBaseTests(unittest.TestCase):
         self.assertEqual(ok.call_count, 1, "appliquée une seule fois tant que la config ne change pas")
 
 
-class AgentApTests(unittest.TestCase):
-    """Le hotspot ne doit être redémarré que pour une bonne raison (changement de canal confirmé, réglages)."""
+class LanInterfaceTests(unittest.TestCase):
+    """Le réseau local passe par le port Ethernet directement (la borne Wi-Fi est configurée à part)."""
 
     def setUp(self):
-        self.applied = []
-        self.cur = None
-        agent._pending = None
-
-        def apply_ap(cfg, ch):          # idempotent comme lan.apply_ap : rien n'est redémarré si rien n'a changé
-            ap = cfg["ap"]
-            wanted = (bool(ap["enabled"]), ap["ssid"], ap["password"], ap["country"], ch)
-            if wanted != self.cur:
-                self.cur = wanted
-                self.applied.append(ch)
-
-        for p in (mock.patch.object(lan, "apply_ap", apply_ap), mock.patch.object(lan, "current_ap", lambda: self.cur)):
+        self.cfg = config.sanitize(config.DEFAULTS)
+        self.cmds = []
+        self.existing = {"eth0"}
+        self.ip = ""
+        for p in (mock.patch.object(lan.system, "iface_exists", lambda i: i in self.existing),
+                  mock.patch.object(lan.system, "iface_ip", lambda i: self.ip),
+                  mock.patch.object(lan.system, "run", lambda cmd, **kw: self.cmds.append(cmd))):
             p.start()
             self.addCleanup(p.stop)
-        self.cfg = config.sanitize(config.DEFAULTS)
 
-    def test_first_start_applies_immediately(self):
-        agent._sync_ap(self.cfg, 6)
-        self.assertEqual(self.applied, [6])
+    def test_address_is_set_on_the_ethernet_port(self):
+        lan.apply_interface(self.cfg)
+        self.assertIn(["ip", "addr", "add", "192.168.1.1/24", "dev", "eth0"], self.cmds)
+        self.assertIn(["ip", "link", "set", "eth0", "up"], self.cmds)
 
-    def test_channel_change_needs_two_consistent_reads(self):
-        agent._sync_ap(self.cfg, 6)
-        agent._sync_ap(self.cfg, 11)
-        self.assertEqual(self.applied, [6], "un seul relevé ne suffit pas")
-        agent._sync_ap(self.cfg, 11)
-        self.assertEqual(self.applied, [6, 11])
+    def test_nothing_is_flushed_when_the_address_is_already_right(self):
+        self.ip = "192.168.1.1/24"
+        lan.apply_interface(self.cfg)
+        self.assertNotIn(["ip", "-4", "addr", "flush", "dev", "eth0"], self.cmds)
 
-    def test_flapping_channel_is_ignored(self):
-        agent._sync_ap(self.cfg, 6)
-        for ch in (11, 6, 11, 6):
-            agent._sync_ap(self.cfg, ch)
-        self.assertEqual(self.applied, [6])
+    def test_old_bridge_and_hotspot_interface_are_removed_on_upgrade(self):
+        self.existing |= {"br0", "ap0"}
+        lan.apply_interface(self.cfg)
+        self.assertIn(["ip", "link", "del", "br0"], self.cmds)
+        self.assertIn(["iw", "dev", "ap0", "del"], self.cmds)
 
-    def test_settings_change_applies_immediately(self):
-        agent._sync_ap(self.cfg, 6)
-        self.cfg["ap"]["ssid"] = "Autre"
-        agent._sync_ap(self.cfg, 6)
-        self.assertEqual(len(self.applied), 2, "nouveau SSID => hotspot reconfiguré")
+    def test_missing_interface_is_reported(self):
+        self.existing = set()
+        with self.assertRaises(RuntimeError):
+            lan.apply_interface(self.cfg)
+
+
+class CarrierTests(unittest.TestCase):
+    def test_cable_state(self):
+        for content, expected in (("1\n", True), ("0\n", False)):
+            with mock.patch("builtins.open", mock.mock_open(read_data=content)):
+                self.assertIs(system.carrier("eth0"), expected)
+        with mock.patch("builtins.open", side_effect=OSError), mock.patch.object(system, "iface_exists", return_value=False):
+            self.assertIsNone(system.carrier("eth9"))
+        with mock.patch("builtins.open", side_effect=OSError), mock.patch.object(system, "iface_exists", return_value=True):
+            self.assertIs(system.carrier("eth0"), False)
 
 
 class WebTests(unittest.TestCase):
@@ -1110,7 +1089,7 @@ class WebTests(unittest.TestCase):
         methods = dict(agentd.METHODS)
         methods.update({
             "status": lambda: {"uplink": {"connected": True, "internet": True},
-                               "ap": {"enabled": True, "channel": 6, "active": True}, "warnings": [],
+                               "lan": {"interface": "eth0", "link": True}, "warnings": [],
                                "fs": {"available": True, "enabled": True, "locked": True, "rescue": False, "data": "ok"},
                                "tls": {"enabled": True, "ready": True, "fingerprint": "AA:BB"},
                                "ssh": {"enabled": False, "active": False, "user": "pi", "password_set": False},
@@ -1201,18 +1180,13 @@ class WebTests(unittest.TestCase):
         self.assertEqual(s["tls"]["fingerprint"], "AA:BB")
         self.assertEqual(s["fs"]["data"], "ok")
 
-    def test_warns_about_default_hotspot_password(self):
-        self.login()
-        self.assertTrue(any("mot de passe par défaut" in w for w in self.c.get("/api/status").get_json()["warnings"]))
-        self.c.post("/api/settings", json={"ap": {"password": "un-vrai-secret-1"}})
-        self.assertFalse(any("mot de passe par défaut" in w for w in self.c.get("/api/status").get_json()["warnings"]))
-
     def test_status_merges_agent_and_config(self):
         self.login()
         s = self.c.get("/api/status").get_json()
         self.assertEqual(s["lan"]["clients"], 3)
         self.assertTrue(s["fs"]["locked"])
-        self.assertEqual(s["ap"]["ssid"], "MaBox")
+        self.assertEqual(s["lan"]["address"], "192.168.1.1/24")
+        self.assertTrue(s["lan"]["link"])
 
     def test_password_change_invalidates_other_sessions(self):
         self.login()
@@ -1263,7 +1237,7 @@ class WebTests(unittest.TestCase):
 
     def test_oversized_body_is_refused(self):
         self.login()
-        r = self.c.post("/api/settings", data=json.dumps({"ap": {"ssid": "x" * 100000}}),
+        r = self.c.post("/api/settings", data=json.dumps({"lan": {"dns": ["x" * 100000]}}),
                         content_type="application/json")
         self.assertEqual(r.status_code, 413)
 
@@ -1272,15 +1246,15 @@ class WebTests(unittest.TestCase):
         bad = self.c.post("/api/settings", json={"lan": {"lease": "1h\nx"}})
         self.assertEqual(bad.status_code, 400)
         self.assertIn("bail", bad.get_json()["error"].lower())
-        ok = self.c.post("/api/settings", json={"ap": {"ssid": "MaBox2", "enabled": True}})
+        ok = self.c.post("/api/settings", json={"usage": {"plan_gb": 80}})
         self.assertEqual(ok.status_code, 200)
-        self.assertEqual(config.load()["ap"]["ssid"], "MaBox2")
+        self.assertEqual(config.load()["usage"]["plan_gb"], 80)
         self.assertEqual(config.load()["web"]["password_hash"] != "", True, "le hash du mot de passe est conservé")
 
     def test_secret_and_hash_cannot_be_injected_via_settings(self):
         self.login()
         before = config.load()["web"]["password_hash"]
-        self.c.post("/api/settings", json={"web": {"password_hash": "x"}, "ap": {"ssid": "A"}})
+        self.c.post("/api/settings", json={"web": {"password_hash": "x"}, "usage": {"plan_gb": 10}})
         self.assertEqual(config.load()["web"]["password_hash"], before)
 
     def test_ssh_toggle_goes_through_the_agent(self):
@@ -1300,8 +1274,7 @@ class WebTests(unittest.TestCase):
 
     def test_new_features_require_login(self):
         for method, path in (("get", "/api/usage"), ("post", "/api/usage/reset"), ("get", "/api/history"), ("get", "/api/speedtest"),
-                             ("post", "/api/speedtest"), ("get", "/api/diagnostic"), ("get", "/api/backup"), ("post", "/api/restore"),
-                             ("get", "/api/qr.svg")):
+                             ("post", "/api/speedtest"), ("get", "/api/diagnostic"), ("get", "/api/backup"), ("post", "/api/restore")):
             with self.subTest(path):
                 kw = {"json": {}} if method == "post" else {}
                 self.assertEqual(getattr(self.c, method)(path, **kw).status_code, 401)
@@ -1368,34 +1341,25 @@ class WebTests(unittest.TestCase):
         data = json.loads(r.data)
         self.assertEqual(data["erouter_backup"], 1)
         self.assertEqual(data["config"]["web"]["secret"], "", "le secret de session n'est jamais sauvegardé")
-        data["config"]["ap"]["ssid"] = "Restauré"
+        data["config"]["usage"]["plan_gb"] = 123
         data["config"]["ssh"]["enabled"] = False                      # une sauvegarde ne doit pas éteindre/allumer le SSH
         data["config"]["web"]["secret"] = "pirate"
         ok = self.c.post("/api/restore", json=data)
         self.assertEqual(ok.status_code, 200)
         self.assertFalse(ok.get_json()["relogin"], "même mot de passe admin : pas de nouvelle connexion")
         after = config.load()
-        self.assertEqual(after["ap"]["ssid"], "Restauré")
+        self.assertEqual(after["usage"]["plan_gb"], 123)
         self.assertEqual(after["web"]["secret"], "x" * 64)
         self.assertTrue(after["ssh"]["enabled"])
 
     def test_restore_rejects_foreign_or_invalid_files(self):
         self.login()
-        before = config.load()["ap"]["ssid"]
+        before = config.load()["usage"]["plan_gb"]
         for bad in ({}, {"erouter_backup": 2, "config": {}}, {"erouter_backup": 1}, {"erouter_backup": 1, "config": "x"},
-                    {"erouter_backup": 1, "config": {"ap": {"ssid": "a\nb"}}}, {"erouter_backup": 1, "config": {"lan": {"address": "n'importe quoi"}}}):
+                    {"erouter_backup": 1, "config": {"usage": {"plan_gb": -1}}}, {"erouter_backup": 1, "config": {"lan": {"address": "n'importe quoi"}}}):
             with self.subTest(bad):
                 self.assertEqual(self.c.post("/api/restore", json=bad).status_code, 400)
-        self.assertEqual(config.load()["ap"]["ssid"], before)
-
-    @unittest.skipUnless(importlib.util.find_spec("qrcode"), "python3-qrcode requis")
-    def test_qr_code_of_the_hotspot_is_a_private_svg(self):
-        self.login()
-        r = self.c.get("/api/qr.svg")
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.mimetype, "image/svg+xml")
-        self.assertEqual(r.headers["Cache-Control"], "no-store")
-        self.assertIn(b"<svg", r.data)
+        self.assertEqual(config.load()["usage"]["plan_gb"], before)
 
     def test_wifi_errors_are_reported(self):
         self.login()

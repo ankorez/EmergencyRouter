@@ -7,15 +7,11 @@ async function scenario() {
   $("wizNext").click(); await sleep(200);                                           // sans mot de passe : refus
   out.errNoPw = $("wizErr").textContent;
   $("wzNetPw").value = "motdepasse-5g"; $("wizNext").click(); await sleep(700);
-  out.title2 = $("wizTitle").textContent;
-  $("wzSsid").value = ""; $("wzPw").value = ""; $("wizNext").click(); await sleep(200);   // champs vides : refus
-  out.errEmpty = $("wizErr").textContent;
-  $("wzSsid").value = "Ouifi"; $("wzPw").value = "motdepasse-box"; $("wizNext").click(); await sleep(300);
-  out.title3 = $("wizTitle").textContent; out.warning = $("wizBody").textContent;
+  out.title2 = $("wizTitle").textContent; out.body2 = $("wizBody").textContent;
   const before = await (await fetch("/__log")).json();                               // qu'a-t-on envoyé au routeur jusqu'ici ?
   out.settingsBeforeFinish = before.filter(e => e.path === "/api/settings").length;
   out.connectPosted = before.some(e => e.path === "/api/wifi/connect");
   $("wizNext").click(); await sleep(800);                                            // « Terminer »
-  out.closed = !$("wizDlg").open; out.alerts = window.__alerts;
+  out.closed = !$("wizDlg").open;
   report(out);
 }

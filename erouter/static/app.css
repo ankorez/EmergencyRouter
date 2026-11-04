@@ -39,7 +39,6 @@ button.danger{color:var(--bad)}
 button.full{width:100%}
 button:disabled{opacity:.5;cursor:default}
 input,select{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
-input.upper{text-transform:uppercase}
 label{display:block;margin-bottom:12px;font-size:13px;color:var(--muted)}
 label input,label select{margin-top:4px;color:var(--text);font-size:15px}
 label.check{display:flex;align-items:center;gap:8px;color:var(--text)}
@@ -98,10 +97,10 @@ a.btn:hover,label.btn:hover{border-color:var(--accent)}
 .step{display:flex;gap:6px;margin-bottom:12px}
 .step i{flex:1;height:4px;border-radius:2px;background:var(--line)}
 .step i.on{background:var(--accent)}
-#qrImg{display:block;margin:0 auto 12px;background:#fff;border-radius:12px;padding:8px}
 dialog form,dialog .stack{max-width:100%}
 #wizDlg,#toolsDlg{width:min(460px,92vw)}
-.item .tag.cap{margin-left:auto}
 .row.wrap{flex-wrap:wrap}
 .row.wrap>label{min-width:120px}
 #limAdd{margin-top:4px}
+details.more{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}
+details.more summary{cursor:pointer;color:var(--muted);font-size:13px;margin-bottom:10px}

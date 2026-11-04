@@ -1,13 +1,13 @@
 # EmergencyRouter
 
 Routeur de secours tout-en-un pour Raspberry Pi (3, 4, 5) quand la fibre tombe.
-Le Pi se connecte en Wi-Fi à ta 5G, et **avec la même puce Wi-Fi** diffuse un hotspot portant le
-SSID/mot de passe de ta box (interface virtuelle `ap0`). Il fait aussi DHCP/DNS et NAT pour le switch en Ethernet.
+Le Wi-Fi du Pi sert **uniquement** à joindre la 5G partagée de ton téléphone. Le réseau local passe par Ethernet : le Pi
+fait DHCP/DNS et NAT sur `eth0`, vers un switch où tu branches ta borne Wi-Fi (UniFi…), configurée de façon indépendante
+avec le SSID et le mot de passe de ta box.
 
 ```
 Internet ← 5G ← wlan0 ┐
-                      [ Pi ] ── br0 (192.168.1.1) ── eth0 → switch → clients
-                  ap0 ┘  (hotspot, même SSID que la box)
+                      [ Pi ] ── eth0 (192.168.1.1) → switch → borne Wi-Fi (UniFi…) + appareils filaires
 ```
 
 ## Aperçu
@@ -40,11 +40,10 @@ le **système en lecture seule** : on peut couper le courant à tout moment.
 1. Flasher avec Raspberry Pi Imager (« Utiliser un fichier personnalisé »). Le compte `pi` est déjà dans l'image
    (voir « Accès SSH ») : **ne règle pas d'utilisateur dans l'Imager**. Vérifie l'empreinte avec
    `shasum -a 256 -c SHA256SUMS`.
-2. Au premier démarrage, le hotspot **`ERouter-Setup`** (mot de passe `erouter-setup`) sert à la configuration.
+2. Branche le port Ethernet du Pi sur ton switch (ou directement sur un ordinateur réglé en DHCP).
 3. Ouvre **https://192.168.1.1/** (ou `https://erouter.local/`) : le navigateur avertit que le certificat est auto-signé
    (normal : compare l'empreinte SHA-256 affichée en bas de la page), choisis le mot de passe admin, puis suis l'assistant :
-   Wi-Fi de la 5G d'abord (garde l'écran « Partage de connexion » ouvert sur le téléphone), vrai SSID/mot de passe du
-   hotspot ensuite. **Après l'assistant, ton appareil est déconnecté** : le hotspot a changé de nom, reconnecte-toi.
+   Wi-Fi de la 5G (garde l'écran « Partage de connexion » ouvert sur le téléphone).
    Une réinstallation (reflash) efface le Wi-Fi de la 5G enregistré : il faut le choisir de nouveau.
 
 ### Accès SSH
@@ -53,10 +52,10 @@ le **système en lecture seule** : on peut couper le courant à tout moment.
 (12 caractères minimum), coche « Activer le SSH » et enregistre. Puis :
 
 ```
-ssh pi@192.168.1.1        # depuis le hotspot ERouter-Setup ou le câble Ethernet du Pi
+ssh pi@192.168.1.1        # depuis le réseau local (Ethernet ou borne Wi-Fi)
 ```
 
-- Le SSH n'est joignable que depuis le **réseau du routeur** (hotspot ou Ethernet), jamais depuis l'uplink (Wi-Fi de la box, 5G).
+- Le SSH n'est joignable que depuis le **réseau local** (Ethernet ou borne Wi-Fi derrière le switch), jamais depuis l'uplink (Wi-Fi de la box, 5G).
 - Le compte est `pi` (réglable au build avec `SSH_USER=nom`) ; l'image n'a ni mot de passe par défaut ni clé : tant que tu n'as
   rien défini dans l'interface, personne ne peut se connecter. `sudo` demande ce même mot de passe.
 - Le mot de passe est refusé s'il est trop court ou prévisible (contient le nom du compte, « password », « azerty »…).
@@ -81,25 +80,19 @@ Sans l'image il n'y a pas de partition de données séparée : la protection de 
 | **Blocage des publicités** | carte « Économies » | bloque ~77 000 domaines publicitaires et de traçage au niveau DNS ([StevenBlack/hosts](https://github.com/StevenBlack/hosts), licence MIT, version épinglée dans `erouter/data/blocklist.SOURCE`) | décompressée en mémoire ; peut gêner quelques sites |
 | **Anti-latence (CAKE)** | carte « Économies » | évite que la connexion devienne très lente quand quelqu'un télécharge (envoi + réception, équité par appareil) | à régler un peu sous les débits réels de la 5G |
 | **Plafond par appareil** | carte « Économies » | limite le débit d'un appareil (suivi par son adresse MAC, même si son IP change) | jusqu'à 16 appareils ; plafond **approximatif** (à ± 30 % près) |
-| **QR code du Wi-Fi** | Outils | connecte un téléphone au hotspot en scannant | — |
 | **Diagnostic** | Outils | un fichier avec l'état, la configuration **sans mot de passe**, le réseau et les journaux, à joindre à une demande d'aide | relis-le : il contient des noms de réseaux, des adresses IP et MAC |
-| **Sauvegarde / restauration** | Outils | exporte et réimporte la configuration (hotspot, forfait, plafonds, mot de passe admin) | le fichier contient le mot de passe du hotspot : garde-le en lieu sûr ; le Wi-Fi 5G et le SSH ne sont pas inclus |
-| **Assistant de premier démarrage** | s'ouvre seul | 3 étapes : Wi-Fi de la 5G, hotspot, terminé. **Le hotspot n'est appliqué qu'à la toute fin** : l'assistant est utilisé *par* ce hotspot, le changer coupe la connexion (il te dit sur quel Wi-Fi te reconnecter) | — |
+| **Sauvegarde / restauration** | Outils | exporte et réimporte la configuration (forfait, plafonds, mot de passe admin) | le fichier contient l'empreinte du mot de passe admin : garde-le en lieu sûr ; le Wi-Fi 5G et le SSH ne sont pas inclus |
+| **Assistant de premier démarrage** | s'ouvre seul | 2 étapes : Wi-Fi de la 5G, puis rappel de configurer la borne Wi-Fi à part | — |
 | **Chien de garde** | automatique | le Pi redémarre seul s'il se fige ; l'agent est relancé s'il ne répond plus | — |
 
 ## Limites à connaître
 
-- **Même puce = même canal.** Le hotspot est calé sur le canal de la connexion 5G ; l'agent le suit automatiquement
-  (le hotspot redémarre brièvement si le canal change).
-- Si le partage de connexion du téléphone est en **5 GHz sur un canal DFS (52-144)**, le hotspot ne peut pas démarrer.
-  Mets le partage en **2,4 GHz** (le plus fiable), ou en 5 GHz sur un canal bas (36-48).
 - Pi 3B et Zero 2 W : 2,4 GHz uniquement. Pi 3B+/4/5 : 2,4 et 5 GHz.
 - **Ne branche pas le Pi en même temps que la box fibre sur le même réseau** (deux serveurs DHCP, même IP).
-- Les débits d'un Wi-Fi unique partagé entre uplink et hotspot sont réduits ; pour de meilleurs résultats, mets les
-  appareils fixes sur Ethernet via le switch.
+- **Pas de câble, pas de réseau local** : l'interface affiche « Câble absent » (et un avertissement) tant que `eth0` n'a pas de liaison.
+- Au premier accès après un reflash, il faut un câble : la borne Wi-Fi n'existe pas encore tant que tu ne l'as pas configurée.
 - Pas de pile dans le Pi : au démarrage hors-ligne l'heure peut être fausse jusqu'à la synchronisation (sans effet sur le routage ; la consommation est comptée mais « non datée » jusque-là).
-- **Hotspot et uplink sur une seule puce : l'économie d'énergie Wi-Fi doit rester coupée**, sinon la radio s'endort, le hotspot n'émet plus ses balises de façon fiable et les nouveaux appareils ne le voient plus (les appareils déjà connectés restent connectés). L'agent la coupe et le revérifie toutes les 30 s ; NetworkManager est configuré dans le même sens (`91-erouter-wifi.conf`).
-- **Le hotspot est en 2,4 GHz** tant que ton iPhone l'est : une seule radio, donc un seul canal pour les deux. Garde le partage en 2,4 GHz (« Maximiser la compatibilité ») : beaucoup d'objets connectés n'ont pas de 5 GHz.
+- **L'économie d'énergie Wi-Fi reste coupée** sur `wlan0` (sinon la liaison avec le téléphone devient instable : latence, pertes). L'agent la coupe et la revérifie toutes les 30 s ; NetworkManager est configuré dans le même sens (`91-erouter-wifi.conf`).
 - **Pas de swap sur la carte SD** : Raspberry Pi OS crée par défaut un fichier `/var/swap` (écriture différée du swap compressé) qui empêche le verrouillage en lecture seule et use la carte. EmergencyRouter impose un swap compressé en mémoire seulement (`Mechanism=zram`).
 
 ## Architecture
@@ -107,14 +100,14 @@ Sans l'image il n'y a pas de partition de données séparée : la protection de 
 | Service | Droits | Rôle |
 |---|---|---|
 | `erouter-data` (`scripts/erouter-data`) | root, au démarrage | vérifie, répare ou recrée la partition de données `/data`, puis la monte |
-| `erouter-agent` (`agent.py`, `agentd.py`, `lan.py`, `tls.py`, `fs.py`) | root | pont `br0`, `ap0`, hostapd, dnsmasq, nftables ; suit le canal de l'uplink ; surveille Internet ; certificat HTTPS ; verrouillage du système ; seul à écrire la config |
+| `erouter-agent` (`agent.py`, `agentd.py`, `lan.py`, `tls.py`, `fs.py`) | root | adresse de `eth0`, dnsmasq, nftables ; surveille Internet ; certificat HTTPS ; verrouillage du système ; seul à écrire la config |
 | `erouter-web` (`web.py`, `webd.py`, `static/`) | utilisateur `erouter`, système en lecture seule, seul droit : ports 80/443 | API Flask + interface (sans dépendance externe, fonctionne hors-ligne), servie en HTTPS par gunicorn ; le port 80 redirige vers HTTPS |
 | `rpc.py` | | socket local `/run/erouter/agent.sock` (0660 root:erouter) ; l'agent n'expose que 14 méthodes et valide chaque paramètre |
 
-Services supplémentaires : `erouter-hostapd`, `erouter-dnsmasq`. Détails et limites : [SECURITY.md](SECURITY.md).
+Service supplémentaire : `erouter-dnsmasq`. Détails et limites : [SECURITY.md](SECURITY.md).
 
 Config : `/data/erouter/config.yaml` (voir `config.example.yaml`), modifiable depuis l'interface.
-Logs : `sudo journalctl -u erouter-data -u erouter-agent -u erouter-web -u erouter-hostapd -u erouter-dnsmasq -n 80`
+Logs : `sudo journalctl -u erouter-data -u erouter-agent -u erouter-web -u erouter-dnsmasq -n 80`
 
 ## Protection de la carte SD
 
@@ -150,17 +143,17 @@ Si le certificat ne peut pas être créé, l'interface reste servie en HTTP (ave
 ## Développement
 
 ```
-make check          # pyflakes + shellcheck + tests unitaires (122)
+make check          # pyflakes + shellcheck + tests unitaires (120)
 make ui-test        # l'interface jouée dans un vrai Chrome sans écran (6 scénarios : tableau de bord, outils, assistant, test de débit, économies, mobile)
 make integration    # vérifications dans un vrai Debian 13 (Docker, conteneur privilégié) :
                     # vrais disques pour la partition de données (saine, corrompue, détruite), post-traitement d'image,
                     # HTTPS de bout en bout avec gunicorn, pare-feu avec du vrai trafic (compteurs, plafonds mesurés, usurpation),
                     # CAKE sur une vraie interface, test de débit contre un serveur local, blocage des pubs avec un vrai dnsmasq,
-                    # QR code relu par un lecteur, diagnostic sans secret, unités systemd, shellcheck
+                    # diagnostic sans secret, unités systemd, shellcheck
 make image          # image flashable
 ```
 La CI GitHub exécute les vérifications statiques et les tests unitaires. Ce qui n'est pas testé automatiquement :
-le hotspot et l'uplink Wi-Fi (matériel), le démarrage réel de l'image et le verrouillage du système sur un Pi.
+l'uplink Wi-Fi (matériel), le démarrage réel de l'image et le verrouillage du système sur un Pi.
 
 ## Feuille de route
 

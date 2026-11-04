@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 STATIC = os.path.join(os.path.dirname(__file__), "..", "..", "erouter", "static")
 LOG = []
-STATE = {"speed_polls": 0, "speed_started": False, "connected": None}
+STATE = {"speed_polls": 0, "speed_started": False}
 LOCK = threading.Lock()
 
 
@@ -27,7 +27,7 @@ def api(scenario):
         "/api/session": {"setup_needed": False, "authenticated": True},
         "/api/status": {
             "uplink": {"connected": True, "ssid": "Partage-5G", "channel": 6, "freq": 2437, "signal": 78, "ip": "172.20.10.2/28", "internet": True},
-            "ap": {"enabled": True, "channel": 6, "active": True, "ssid": "MaBox"}, "lan": {"address": "192.168.1.1/24", "clients": 2},
+            "lan": {"interface": "eth0", "link": True, "address": "192.168.1.1/24", "clients": 2},
             "fs": {"available": True, "enabled": True, "locked": True, "rescue": False, "data": "ok"},
             "tls": {"enabled": True, "ready": True, "fingerprint": "AA:BB:CC"},
             "ssh": {"enabled": False, "active": False, "user": "pi", "password_set": False},
@@ -37,14 +37,13 @@ def api(scenario):
             {"in_use": True, "ssid": "Partage-5G", "signal": 78, "secured": True, "freq": 2437},
             {"in_use": False, "ssid": "Routeur-4G", "signal": 55, "secured": True, "freq": 2462}]},
         "/api/settings": {
-            "ap": {"enabled": True, "ssid": "MaBox", "password": "mot-de-passe-wifi", "country": "FR", "fallback_channel": 6},
             "lan": {"address": "192.168.1.1/24", "dhcp_start": "192.168.1.100", "dhcp_end": "192.168.1.250", "lease": "12h", "dns": ["1.1.1.1"]},
             "usage": {"plan_gb": 50, "alert_percent": 80, "reset_day": 1},
             "savings": {"block_ads": False, "limits": [{"mac": "02:00:00:00:00:01", "down_mbit": 5, "up_mbit": 0}]},
             "sqm": {"enabled": False, "down_mbit": 0, "up_mbit": 0}, "setup": {"done": not wizard}},
         "/api/clients": {"clients": [
-            {"hostname": "portable", "ip": "192.168.1.101", "mac": "02:00:00:00:00:01", "wifi": True},
-            {"hostname": "telephone", "ip": "192.168.1.102", "mac": "02:00:00:00:00:02", "wifi": True}]},
+            {"hostname": "portable", "ip": "192.168.1.101", "mac": "02:00:00:00:00:01"},
+            {"hostname": "telephone", "ip": "192.168.1.102", "mac": "02:00:00:00:00:02"}]},
         "/api/usage": {"clock": True, "today": {"rx": 1_200_000_000, "tx": 300_000_000}, "period": {"rx": 31_000_000_000, "tx": 10_000_000_000, "start": "2026-11-01"},
                        "plan_bytes": 50_000_000_000, "percent": 82.0, "devices": [
                            {"mac": "02:00:00:00:00:01", "name": "portable", "ip": "192.168.1.101", "down": 30_000_000_000, "up": 8_000_000_000},
@@ -97,14 +96,9 @@ class Handler(BaseHTTPRequestHandler):
                 done = STATE["speed_started"] and not running
             return self._send({"running": running, "stage": "téléchargement", "result": RESULT if (done or not STATE["speed_started"]) else None,
                                "history": [RESULT, {**RESULT, "at": RESULT["at"] - 3600}] if (done or not STATE["speed_started"]) else []})
-        if path == "/api/qr.svg":
-            return self._send('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>', "image/svg+xml")
         if path in ("/api/diagnostic", "/api/backup"):
             return self._send("{}", "application/octet-stream")
         data = api(self.scenario).get(path)
-        if path == "/api/status" and STATE["connected"]:               # la connexion demandée est (enfin) établie
-            data = json.loads(json.dumps(data))
-            data["uplink"]["ssid"] = STATE["connected"]
         return self._send(data) if data is not None else self._send({"error": "inconnu"}, code=404)
 
     def do_POST(self):
@@ -115,12 +109,6 @@ class Handler(BaseHTTPRequestHandler):
             LOG.append({"path": path, "body": body})
             if path == "/api/speedtest":
                 STATE["speed_started"], STATE["speed_polls"] = True, 0
-            if path == "/api/wifi/connect":
-                STATE["connected"] = body["ssid"]
-        if path == "/api/wifi/connect" and self.scenario == "wizard-cut":
-            self.close_connection = True                                # le Wi-Fi du routeur se coupe : aucune réponse n'arrive
-            self.connection.close()
-            return
         if path == "/api/speedtest":
             return self._send({"running": True, "stage": "latence", "result": None, "history": []})
         return self._send({"ok": True, "enabled": False, "relogin": False})

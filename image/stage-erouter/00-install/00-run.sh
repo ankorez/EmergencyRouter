@@ -30,7 +30,7 @@ rm -rf /etc/NetworkManager/system-connections /var/lib/NetworkManager
 ln -s /data/nm-connections /etc/NetworkManager/system-connections
 ln -s /data/nm-state /var/lib/NetworkManager
 systemctl enable erouter-data.service erouter-agent.service erouter-web.service
-systemctl disable hostapd dnsmasq 2>/dev/null || true
+systemctl disable dnsmasq 2>/dev/null || true
 systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
 systemctl disable dphys-swapfile 2>/dev/null || true
 CHROOT

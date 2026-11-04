@@ -23,30 +23,30 @@ table inet erouter {
         ct state invalid drop
         icmp type echo-request limit rate 10/second accept
         # depuis le LAN uniquement : DHCP, DNS, mDNS, interface web ; SSH limité en débit
-        iifname "{{ bridge }}" udp dport { 53, 67, 5353 } accept
-        iifname "{{ bridge }}" tcp dport { 53, {{ web_ports|join(', ') }} } accept
-        iifname "{{ bridge }}" tcp dport 22 ct state new limit rate 12/minute burst 5 packets accept
+        iifname "{{ lan_if }}" udp dport { 53, 67, 5353 } accept
+        iifname "{{ lan_if }}" tcp dport { 53, {{ web_ports|join(', ') }} } accept
+        iifname "{{ lan_if }}" tcp dport 22 ct state new limit rate 12/minute burst 5 packets accept
     }
     chain forward {
         type filter hook forward priority 0; policy drop;
         ct state invalid drop
         # anti-usurpation : un client du LAN ne peut émettre qu'avec une adresse de son réseau
-        iifname "{{ bridge }}" ip saddr != {{ lan_net }} drop
+        iifname "{{ lan_if }}" ip saddr != {{ lan_net }} drop
 {% for l in limits %}
         # plafond de débit pour {{ l.mac }}
 {% if l.up_kbytes %}
-        iifname "{{ bridge }}" oifname "{{ uplink }}" ip saddr {{ l.ip }} limit rate over {{ l.up_kbytes }} kbytes/second burst 64 kbytes drop
+        iifname "{{ lan_if }}" oifname "{{ uplink }}" ip saddr {{ l.ip }} limit rate over {{ l.up_kbytes }} kbytes/second burst 64 kbytes drop
 {% endif %}
 {% if l.down_kbytes %}
-        iifname "{{ uplink }}" oifname "{{ bridge }}" ct state established,related ip daddr {{ l.ip }} limit rate over {{ l.down_kbytes }} kbytes/second burst 64 kbytes drop
+        iifname "{{ uplink }}" oifname "{{ lan_if }}" ct state established,related ip daddr {{ l.ip }} limit rate over {{ l.down_kbytes }} kbytes/second burst 64 kbytes drop
 {% endif %}
 {% endfor %}
         # comptage (après les plafonds : ce qui est jeté n'est pas compté ; les connexions entrantes non sollicitées non plus)
-        iifname "{{ bridge }}" oifname "{{ uplink }}" add @usage_up { ip saddr counter }
-        iifname "{{ uplink }}" oifname "{{ bridge }}" ct state established,related add @usage_down { ip daddr counter }
+        iifname "{{ lan_if }}" oifname "{{ uplink }}" add @usage_up { ip saddr counter }
+        iifname "{{ uplink }}" oifname "{{ lan_if }}" ct state established,related add @usage_down { ip daddr counter }
         ct state established,related accept
-        iifname "{{ bridge }}" oifname "{{ uplink }}" accept
-        iifname "{{ bridge }}" oifname "{{ bridge }}" accept
+        iifname "{{ lan_if }}" oifname "{{ uplink }}" accept
+        iifname "{{ lan_if }}" oifname "{{ lan_if }}" accept
     }
     chain postrouting {
         type nat hook postrouting priority 100;

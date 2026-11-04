@@ -38,10 +38,22 @@
   </section>
 
   <section class="card">
-    <h2>Hotspot &amp; réseau local</h2>
-    <div class="hero"><span class="dot" id="apDot"></span>
-      <div><div class="big" id="apTitle">…</div><div class="muted" id="apSub"></div></div></div>
-    <div class="kv" id="apKv"></div>
+    <h2>Réseau local</h2>
+    <div class="hero"><span class="dot" id="lanDot"></span>
+      <div><div class="big" id="lanTitle">…</div><div class="muted" id="lanSub"></div></div></div>
+    <div class="kv" id="lanKv"></div>
+    <details class="more">
+      <summary>Réglages DHCP et DNS</summary>
+      <form id="lanForm">
+        <label>Adresse du routeur (CIDR)<input id="lanAddr" required></label>
+        <div class="row">
+          <label>DHCP début<input id="lanStart" required></label>
+          <label>DHCP fin<input id="lanEnd" required></label>
+        </div>
+        <label>DNS (séparés par des virgules)<input id="lanDns"></label>
+        <button class="primary">Enregistrer</button>
+      </form>
+    </details>
   </section>
 
   <section class="card wide" id="usageCard">
@@ -72,35 +84,8 @@
       <h2>Réseaux Wi-Fi (uplink 5G)</h2>
       <button id="scanBtn">Actualiser</button>
     </div>
-    <p class="muted small">« Actualiser » lance un nouveau scan : le hotspot peut se couper une ou deux secondes.</p>
+    <p class="muted small">Choisis le partage de connexion de ton téléphone (idéalement en 2,4 GHz, écran « Partage de connexion » ouvert).</p>
     <div class="list" id="networks"><div class="muted">Chargement…</div></div>
-  </section>
-
-  <section class="card">
-    <h2>Réglages du hotspot</h2>
-    <form id="apForm">
-      <label>SSID (idem ta box fibre)<input id="apSsid" required maxlength="32"></label>
-      <label>Mot de passe Wi-Fi<input id="apPw" type="text" required minlength="8" maxlength="63" autocomplete="off"></label>
-      <div class="row">
-        <label>Pays<input id="apCountry" maxlength="2" class="upper"></label>
-        <label>Canal de repli<input id="apChan" type="number" min="1" max="13"></label>
-      </div>
-      <label class="check"><input id="apOn" type="checkbox"> Hotspot activé</label>
-      <button class="primary">Enregistrer</button>
-    </form>
-  </section>
-
-  <section class="card">
-    <h2>Réseau local (DHCP)</h2>
-    <form id="lanForm">
-      <label>Adresse du routeur (CIDR)<input id="lanAddr" required></label>
-      <div class="row">
-        <label>DHCP début<input id="lanStart" required></label>
-        <label>DHCP fin<input id="lanEnd" required></label>
-      </div>
-      <label>DNS (séparés par des virgules)<input id="lanDns"></label>
-      <button class="primary">Enregistrer</button>
-    </form>
   </section>
 
   <section class="card">
@@ -165,7 +150,7 @@
 
   <section class="card wide">
     <h2>Appareils connectés</h2>
-    <div class="table-wrap"><table><thead><tr><th>Nom</th><th>IP</th><th>MAC</th><th>Type</th></tr></thead><tbody id="clients"></tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Nom</th><th>IP</th><th>MAC</th></tr></thead><tbody id="clients"></tbody></table></div>
   </section>
 </main>
 <footer class="foot muted small">
@@ -205,21 +190,14 @@
   <h3>Outils</h3>
   <div class="stack">
     <button id="toolWizard">Assistant de configuration</button>
-    <button id="toolQr">QR code du Wi-Fi</button>
     <a class="btn" href="/api/diagnostic" download>Exporter un diagnostic</a>
     <a class="btn" href="/api/backup" download>Sauvegarder la configuration</a>
     <label class="btn" for="restoreFile">Restaurer une sauvegarde</label>
     <input type="file" id="restoreFile" accept="application/json,.json" hidden>
   </div>
-  <p class="muted small">La sauvegarde contient le mot de passe du hotspot : garde-la en lieu sûr. Le Wi-Fi de la 5G et le mot de passe SSH ne sont pas inclus. Le diagnostic ne contient aucun mot de passe.</p>
+  <p class="muted small">La sauvegarde contient des réglages sensibles : garde-la en lieu sûr. Le Wi-Fi de la 5G et le mot de passe SSH ne sont pas inclus. Le diagnostic ne contient aucun mot de passe.</p>
   <p class="error" id="toolsErr"></p>
   <button id="toolsClose">Fermer</button>
-</dialog>
-<dialog id="qrDlg">
-  <h3>QR code du Wi-Fi</h3>
-  <p class="muted small" id="qrText"></p>
-  <img id="qrImg" alt="QR code pour rejoindre le Wi-Fi du hotspot" width="260" height="260">
-  <button id="qrClose">Fermer</button>
 </dialog>
 <dialog id="wizDlg">
   <form id="wizForm">

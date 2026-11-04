@@ -32,10 +32,6 @@ def freq_to_channel(freq):
     return 0
 
 
-def is_dfs(freq):
-    return 5250 <= freq <= 5725
-
-
 def wifi_link(iface):
     """État de l'association Wi-Fi client (via iw)."""
     out = {"connected": False, "ssid": "", "freq": 0, "channel": 0, "signal": None}
@@ -175,16 +171,17 @@ def reconnect(iface):
     run(["nmcli", "device", "connect", iface], timeout=40)
 
 
-def ap_stations():
-    """MAC des clients Wi-Fi connectés à notre hotspot."""
-    if not iface_exists("ap0"):
-        return set()
-    p = run(["iw", "dev", "ap0", "station", "dump"])
-    return {m.lower() for m in re.findall(r"^Station ([0-9a-fA-F:]{17})", p.stdout, re.M)}
+def carrier(iface):
+    """True si un câble est branché et actif sur l'interface, False sinon, None si l'interface n'existe pas."""
+    try:
+        with open(f"/sys/class/net/{iface}/carrier") as f:
+            return f.read().strip() == "1"
+    except OSError:
+        return None if not iface_exists(iface) else False     # interface éteinte : « carrier » illisible
 
 
 def clients(leases_file):
-    wifi = ap_stations()
+    """Appareils du réseau local (baux DHCP) : mac, ip, nom."""
     out = []
     try:
         with open(leases_file) as f:
@@ -192,11 +189,7 @@ def clients(leases_file):
                 parts = line.split()
                 if len(parts) >= 4:
                     exp, mac, ip, host = parts[:4]
-                    out.append({
-                        "mac": mac.lower(), "ip": ip,
-                        "hostname": "" if host == "*" else host,
-                        "wifi": mac.lower() in wifi,
-                    })
+                    out.append({"mac": mac.lower(), "ip": ip, "hostname": "" if host == "*" else host})
     except FileNotFoundError:
         pass
     return sorted(out, key=lambda c: tuple(int(x) for x in c["ip"].split(".")))
@@ -208,7 +201,3 @@ def uptime():
             return int(float(f.read().split()[0]))
     except OSError:
         return 0
-
-
-def hostapd_active():
-    return run(["systemctl", "is-active", "--quiet", "erouter-hostapd"]).returncode == 0

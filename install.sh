@@ -19,8 +19,8 @@ if findmnt -no OPTIONS / | tr ',' '\n' | grep -qx ro; then
 fi
 apt-get update
 apt-get install -y --no-install-recommends \
-  network-manager hostapd dnsmasq-base nftables iw rfkill iproute2 iputils-ping openssl \
-  python3 python3-flask python3-yaml python3-jinja2 python3-gunicorn python3-qrcode curl wireless-regdb
+  network-manager dnsmasq-base nftables iw rfkill iproute2 iputils-ping openssl \
+  python3 python3-flask python3-yaml python3-jinja2 python3-gunicorn curl wireless-regdb
 
 echo "==> Utilisateur sans privilèges pour l'interface web"
 id erouter >/dev/null 2>&1 || adduser --system --group --no-create-home --shell /usr/sbin/nologin erouter
@@ -68,8 +68,7 @@ systemctl restart systemd-journald
 sysctl --system >/dev/null
 
 echo "==> Services"
-systemctl disable --now hostapd dnsmasq 2>/dev/null || true
-systemctl unmask hostapd 2>/dev/null || true
+systemctl disable --now dnsmasq 2>/dev/null || true
 systemctl daemon-reload
 systemctl restart NetworkManager
 systemctl enable erouter-data.service erouter-agent.service erouter-web.service
@@ -85,4 +84,4 @@ echo
 echo "Installé. Ouvre https://${IP:-192.168.1.1}/ depuis le LAN pour finir la configuration"
 echo "(avertissement du navigateur au premier accès : le certificat est auto-signé, compare son empreinte affichée en bas de page)."
 echo "Redémarre le Pi une fois : le swap sur la carte (/var/swap) est supprimé et le chien de garde matériel activé."
-echo "Logs : sudo journalctl -u erouter-agent -u erouter-web -u erouter-hostapd -u erouter-dnsmasq -n 80"
+echo "Logs : sudo journalctl -u erouter-agent -u erouter-web -u erouter-dnsmasq -n 80"

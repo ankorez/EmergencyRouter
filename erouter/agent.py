@@ -1,4 +1,4 @@
-"""Boucle de fond : applique la config, suit le canal de l'uplink, garde l'AP aligné, surveille Internet."""
+"""Boucle de fond : applique la config, surveille l'uplink Wi-Fi (5G partagée) et Internet."""
 import copy
 import logging
 import threading
@@ -13,7 +13,7 @@ _lock = threading.Lock()
 state = {
     "uplink": {"connected": False, "ssid": "", "channel": 0, "freq": 0, "signal": None,
                "ip": "", "internet": False},
-    "ap": {"enabled": False, "channel": 0, "active": False},
+    "lan": {"interface": "eth0", "link": None},
     "warnings": [],
     "fs": {"available": False, "enabled": False, "locked": False, "rescue": False, "data": "none"},
     "tls": {"enabled": False, "ready": False, "fingerprint": ""},
@@ -24,10 +24,9 @@ TICK = 5
 OFFLINE_RECONNECT_AFTER = 90   # s sans Internet (alors qu'associé) avant de relancer le Wi-Fi
 RECONNECT_COOLDOWN = 300
 
-_pending = None                # (canal candidat, nb de lectures consécutives)
 _offline_since = None
 _last_reconnect = 0.0
-_applied_base = {}             # partie -> valeur appliquée ("bridge", "dnsmasq", "firewall")
+_applied_base = {}             # partie -> valeur appliquée ("interface", "dnsmasq", "firewall")
 _base_failed_at = 0.0
 BASE_RETRY = 30                # s entre deux essais si l'application de la config échoue
 _tls_failed_at = 0.0
@@ -55,16 +54,16 @@ def request_apply():
 
 
 def _apply_base_if_changed(cfg):
-    """Pont, DHCP/DNS et pare-feu : chaque partie n'est réappliquée que si SA config a changé (évite de couper les clients).
+    """Interface LAN, DHCP/DNS et pare-feu : chaque partie n'est réappliquée que si SA config a changé (évite de couper les clients).
     Un nouveau bail DHCP d'un appareil plafonné ne met à jour que le pare-feu."""
     global _base_failed_at
     lan_cfg = copy.deepcopy(cfg["lan"])
     wanted = {
-        "bridge": (lan_cfg, cfg["uplink"]["interface"]),
+        "interface": (lan_cfg,),
         "dnsmasq": (lan_cfg, bool(cfg["savings"]["block_ads"])),
         "firewall": (lan_cfg, cfg["uplink"]["interface"], lan.web_ports(cfg), lan.limit_rules(cfg)),
     }
-    todo = [part for part in ("bridge", "dnsmasq", "firewall") if _applied_base.get(part) != wanted[part]]
+    todo = [part for part in ("interface", "dnsmasq", "firewall") if _applied_base.get(part) != wanted[part]]
     if not todo or time.monotonic() - _base_failed_at < BASE_RETRY:
         return
     try:
@@ -77,19 +76,17 @@ def _apply_base_if_changed(cfg):
 
 
 def _sync_power_save(up_if):
-    """Le hotspot et la connexion à l'iPhone partagent UNE puce : avec l'économie d'énergie, la radio s'endort et le
-    hotspot n'émet plus ses balises de façon fiable. Les appareils déjà connectés restent connectés, mais les nouveaux
-    (iPad, Android…) ne le voient plus. On la coupe, et on le revérifie car NetworkManager peut la remettre."""
+    """Avec l'économie d'énergie, la radio s'endort et la liaison avec le téléphone devient instable (latence, pertes).
+    On la coupe, et on le revérifie car NetworkManager peut la remettre."""
     global _last_ps_check
     if time.monotonic() - _last_ps_check < POWER_SAVE_EVERY:
         return
     _last_ps_check = time.monotonic()
-    for iface in (up_if, lan.AP_IF):
-        if system.iface_exists(iface) and system.power_save(iface):
-            if system.set_power_save(iface, False):
-                log.info("économie d'énergie Wi-Fi désactivée sur %s", iface)
-            else:
-                log.warning("impossible de désactiver l'économie d'énergie Wi-Fi sur %s", iface)
+    if system.iface_exists(up_if) and system.power_save(up_if):
+        if system.set_power_save(up_if, False):
+            log.info("économie d'énergie Wi-Fi désactivée sur %s", up_if)
+        else:
+            log.warning("impossible de désactiver l'économie d'énergie Wi-Fi sur %s", up_if)
 
 
 def get_usage():
@@ -173,30 +170,6 @@ def _sync_ssh(cfg):
     return active
 
 
-def _desired_channel(cfg, link):
-    # une seule puce Wi-Fi : l'AP doit être sur le canal de l'uplink ; sinon canal de repli
-    if link["connected"] and link["channel"]:
-        return link["channel"]
-    return int(cfg["ap"]["fallback_channel"])
-
-
-def _sync_ap(cfg, desired):
-    """Applique l'AP ; un changement de canal doit être confirmé par deux lectures (anti-rebond)."""
-    global _pending
-    ap = cfg["ap"]
-    cur = lan.current_ap()
-    same_settings = cur is not None and cur[:4] == (bool(ap["enabled"]), ap["ssid"], ap["password"], ap["country"])
-    if cur is None or (same_settings and cur[4] == desired) or not same_settings:
-        _pending = None
-        lan.apply_ap(cfg, desired)    # 1er démarrage, réglages modifiés, ou relance si hostapd est tombé
-        return
-    if _pending and _pending[0] == desired:
-        lan.apply_ap(cfg, desired)
-        _pending = None
-    else:
-        _pending = (desired, 1)
-
-
 def _watchdog(up_if, link, internet):
     global _offline_since, _last_reconnect
     now = time.time()
@@ -224,18 +197,13 @@ def _tick():
     _record(link, up_if, ms)
     _sync_sqm(cfg, up_if)
 
-    desired = _desired_channel(cfg, link)
-    _sync_ap(cfg, desired)
     _sync_power_save(up_if)
 
-    ap_active = system.hostapd_active()
+    lan_if = lan.lan_if(cfg)
+    carrier = system.carrier(lan_if)
     warnings = []
-    if cfg["ap"]["enabled"] and not ap_active:
-        warnings.append("Le hotspot n'a pas pu démarrer sur le canal %d. Si la 5G est en 5 GHz sur un "
-                        "canal DFS (52-144) ou si ta puce est 2,4 GHz seulement, passe le partage de "
-                        "connexion du téléphone en 2,4 GHz." % desired)
-    if link["connected"] and system.is_dfs(link["freq"]):
-        warnings.append("L'uplink est sur un canal DFS : le hotspot risque de ne pas démarrer.")
+    if carrier is False:
+        warnings.append(f"Aucun câble réseau détecté sur {lan_if} : branche le switch ou la borne Wi-Fi.")
 
     if _sqm_error and cfg["sqm"]["enabled"]:
         warnings.append(f"Anti-latence indisponible : {_sqm_error}")
@@ -263,7 +231,7 @@ def _tick():
             "freq": link["freq"], "signal": link["signal"],
             "ip": system.iface_ip(up_if) if link["connected"] else "", "internet": internet,
         }
-        state["ap"] = {"enabled": bool(cfg["ap"]["enabled"]), "channel": desired, "active": ap_active}
+        state["lan"] = {"interface": lan_if, "link": carrier}
         state["warnings"] = warnings
         state["fs"] = fs_state
         state["tls"] = tls.status(cfg["web"]["tls"])

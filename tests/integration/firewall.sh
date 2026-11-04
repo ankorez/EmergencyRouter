@@ -1,7 +1,7 @@
 #!/bin/bash
 # Pare-feu : vrai trafic entre trois « mondes » (réseaux isolés Linux), avec le vrai jeu de règles nftables.
 #
-#   client (ns lan)  ──br0──  ROUTEUR (cet espace de noms)  ──wlan0──  Internet (ns net)
+#   client (ns lan)  ──lan0──  ROUTEUR (cet espace de noms)  ──wlan0──  Internet (ns net)
 #
 # Appelé par check.sh (conteneur privilégié, Debian 13). Affiche ✔ / ✘ et renvoie le nombre d'échecs.
 set -u
@@ -10,31 +10,31 @@ FAIL=0
 ok()  { echo "  ✔ $*"; }
 bad() { echo "  ✘ $*"; FAIL=$((FAIL + 1)); }
 
-cleanup() { ip netns del lan 2>/dev/null; ip netns del net 2>/dev/null; ip link del br0 2>/dev/null; ip link del wlan0 2>/dev/null; pkill -f "listen.py" 2>/dev/null; pkill -f "serve_bytes.py" 2>/dev/null; true; }
+cleanup() { ip netns del lan 2>/dev/null; ip netns del net 2>/dev/null; ip link del lan0 2>/dev/null; ip link del wlan0 2>/dev/null; pkill -f "listen.py" 2>/dev/null; pkill -f "serve_bytes.py" 2>/dev/null; true; }
 trap cleanup EXIT
 cleanup
 
-# --- topologie : le routeur a br0 (côté LAN) et wlan0 (côté « 5G »), comme sur le Pi
+# --- topologie : le routeur a lan0 (côté LAN) et wlan0 (côté « 5G »), comme sur le Pi
 ip netns add lan; ip netns add net
-ip link add br0 type veth peer name br0_in;     ip link set br0_in netns lan
+ip link add lan0 type veth peer name lan0_in;     ip link set lan0_in netns lan
 ip link add wlan0 type veth peer name wlan0_in; ip link set wlan0_in netns net
-ip addr add 10.1.0.1/24 dev br0;  ip link set br0 up
+ip addr add 10.1.0.1/24 dev lan0;  ip link set lan0 up
 ip addr add 10.2.0.1/24 dev wlan0; ip link set wlan0 up
 ip addr add fd00:2::1/64 dev wlan0 nodad
-ip addr add fd00:1::1/64 dev br0 nodad
-ip -n lan addr add 10.1.0.50/24 dev br0_in; ip -n lan link set br0_in up; ip -n lan link set lo up
+ip addr add fd00:1::1/64 dev lan0 nodad
+ip -n lan addr add 10.1.0.50/24 dev lan0_in; ip -n lan link set lan0_in up; ip -n lan link set lo up
 ip -n lan route add default via 10.1.0.1
-ip -n lan addr add fd00:1::50/64 dev br0_in nodad
+ip -n lan addr add fd00:1::50/64 dev lan0_in nodad
 ip -n net addr add 10.2.0.9/24 dev wlan0_in; ip -n net link set wlan0_in up; ip -n net link set lo up
 ip -n net addr add fd00:2::9/64 dev wlan0_in nodad
 ip -n net route add 10.1.0.0/24 via 10.2.0.1          # un attaquant qui connaît le réseau du LAN
 echo 1 > /proc/sys/net/ipv4/ip_forward
-echo 2 > /proc/sys/net/ipv4/conf/all/rp_filter; echo 2 > /proc/sys/net/ipv4/conf/br0/rp_filter   # comme /etc/sysctl.d/90-erouter.conf
+echo 2 > /proc/sys/net/ipv4/conf/all/rp_filter; echo 2 > /proc/sys/net/ipv4/conf/lan0/rp_filter   # comme /etc/sysctl.d/90-erouter.conf
 # Voisins IPv6 statiques : le pare-feu bloque (volontairement) la découverte de voisins ; ainsi seul le pare-feu décide
 mac() { ip netns exec "$1" cat "/sys/class/net/$2/address"; }
-ip -6 neigh replace fd00:1::50 lladdr "$(mac lan br0_in)" dev br0 nud permanent
+ip -6 neigh replace fd00:1::50 lladdr "$(mac lan lan0_in)" dev lan0 nud permanent
 ip -6 neigh replace fd00:2::9 lladdr "$(mac net wlan0_in)" dev wlan0 nud permanent
-ip -n lan -6 neigh replace fd00:1::1 lladdr "$(cat /sys/class/net/br0/address)" dev br0_in nud permanent
+ip -n lan -6 neigh replace fd00:1::1 lladdr "$(cat /sys/class/net/lan0/address)" dev lan0_in nud permanent
 ip -n net -6 neigh replace fd00:2::1 lladdr "$(cat /sys/class/net/wlan0/address)" dev wlan0_in nud permanent
 
 # --- le vrai pare-feu du projet
@@ -43,7 +43,7 @@ import sys
 from jinja2 import Environment, FileSystemLoader
 e = Environment(loader=FileSystemLoader(sys.argv[1] + "/erouter/templates"))
 open("/tmp/fw.nft", "w").write(e.get_template("nftables.conf.j2").render(
-    bridge="br0", uplink="wlan0", web_ports=[443, 80], lan_net="10.1.0.0/24"))
+    lan_if="lan0", uplink="wlan0", web_ports=[443, 80], lan_net="10.1.0.0/24"))
 PY
 nft flush ruleset
 nft -f /tmp/fw.nft && ok "règles chargées dans le noyau" || { bad "règles refusées par le noyau"; exit 1; }
@@ -79,7 +79,7 @@ except Exception: sys.exit(1)' "$2" "$3"
 expect_open()   { can_connect "$1" "$2" "$3" && ok "$4" || bad "$4 (devrait être ouvert)"; }
 expect_closed() { can_connect "$1" "$2" "$3" && bad "$4 (devrait être REFUSÉ)" || ok "$4"; }
 
-echo "  -- depuis le réseau du routeur (hotspot / Ethernet)"
+echo "  -- depuis le réseau du routeur (Ethernet)"
 expect_open   lan 10.1.0.1 443  "web HTTPS (443) joignable"
 expect_open   lan 10.1.0.1 80   "redirection HTTP (80) joignable"
 expect_open   lan 10.1.0.1 22   "SSH (22) joignable"
@@ -103,8 +103,8 @@ can_connect lan 10.2.0.9 5000; sleep 0.3
   || bad "NAT : source vue par Internet = $(tail -1 /tmp/src_5000 2>/dev/null)"
 
 echo "  -- usurpation d'adresse depuis le LAN"
-ip -n lan addr add 192.168.77.7/24 dev br0_in
-ip route add 192.168.77.0/24 dev br0        # le routeur sait renvoyer vers cette adresse : sans la règle, le faux client passerait
+ip -n lan addr add 192.168.77.7/24 dev lan0_in
+ip route add 192.168.77.0/24 dev lan0        # le routeur sait renvoyer vers cette adresse : sans la règle, le faux client passerait
 spoof() { ip netns exec lan python3 -c '
 import socket
 s = socket.socket(); s.settimeout(2); s.bind(("192.168.77.7", 0))
@@ -170,7 +170,7 @@ import sys
 from jinja2 import Environment, FileSystemLoader
 e = Environment(loader=FileSystemLoader(sys.argv[1] + "/erouter/templates"))
 open("/tmp/fw-limits.nft", "w").write(e.get_template("nftables.conf.j2").render(
-    bridge="br0", uplink="wlan0", web_ports=[443, 80], lan_net="10.1.0.0/24",
+    lan_if="lan0", uplink="wlan0", web_ports=[443, 80], lan_net="10.1.0.0/24",
     limits=[{"mac": "aa:bb:cc:dd:ee:01", "ip": "10.1.0.50", "up_kbytes": int(sys.argv[2]), "down_kbytes": int(sys.argv[3])}]))
 PY
   nft flush ruleset; nft -f /tmp/fw-limits.nft

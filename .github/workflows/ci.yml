@@ -20,7 +20,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends python3-flask python3-yaml python3-jinja2 \
-            python3-gunicorn python3-qrcode python3-pyflakes shellcheck dnsmasq-base nftables openssl
+            python3-gunicorn python3-pyflakes shellcheck dnsmasq-base nftables openssl
       - name: Analyse statique Python
         run: python3 -m pyflakes erouter tests
       - name: Tests
@@ -33,7 +33,7 @@ jobs:
           from jinja2 import Environment, FileSystemLoader
           e = Environment(loader=FileSystemLoader("erouter/templates"))
           open("/tmp/dnsmasq.conf", "w").write(e.get_template("dnsmasq.conf.j2").render(
-              bridge="br0", gateway="192.168.1.1", netmask="255.255.255.0", start="192.168.1.100",
+              lan_if="eth0", gateway="192.168.1.1", netmask="255.255.255.0", start="192.168.1.100",
               end="192.168.1.250", lease="12h", dns=["1.1.1.1"], leases="/tmp/leases"))
           PY
           dnsmasq --test --conf-file=/tmp/dnsmasq.conf

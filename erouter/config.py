@@ -18,18 +18,11 @@ _lock = threading.Lock()
 DEFAULTS = {
     "lan": {
         "address": "192.168.1.1/24",   # idéalement la même IP que ta box fibre
-        "interface": "eth0",           # port Ethernet vers le switch ("" pour désactiver)
+        "interface": "eth0",           # port Ethernet vers le switch et la borne Wi-Fi (le Wi-Fi du Pi ne sert qu'à la 5G)
         "dhcp_start": "192.168.1.100",
         "dhcp_end": "192.168.1.250",
         "lease": "12h",
         "dns": ["1.1.1.1", "9.9.9.9"],
-    },
-    "ap": {
-        "enabled": True,
-        "ssid": "MaBox",               # même SSID que la box fibre
-        "password": "changeme123",     # même mot de passe que la box fibre
-        "country": "FR",
-        "fallback_channel": 6,         # utilisé tant que l'uplink n'est pas connecté
     },
     "uplink": {
         "interface": "wlan0",
@@ -69,7 +62,6 @@ _IFACE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}$")   # jamais de « - » 
 _MAC = re.compile(r"^([0-9a-f]{2}:){5}[0-9a-f]{2}$")
 _USER = re.compile(r"^[a-z_][a-z0-9_-]{0,30}$")
 _LEASE = re.compile(r"^\d{1,5}[smhd]?$")
-_COUNTRY = re.compile(r"^[A-Z]{2}$")
 
 
 def _merge(base, over):
@@ -95,7 +87,7 @@ def validate(cfg):
 
 
 def _validate(cfg):
-    lan, ap, up, web, ssh = cfg["lan"], cfg["ap"], cfg["uplink"], cfg["web"], cfg["ssh"]
+    lan, up, web, ssh = cfg["lan"], cfg["uplink"], cfg["web"], cfg["ssh"]
 
     iface = ipaddress.IPv4Interface(lan["address"])
     net = iface.network
@@ -111,8 +103,8 @@ def _validate(cfg):
         raise ValueError("DNS : 1 à 4 adresses")
     for d in dns:
         ipaddress.IPv4Address(d)
-    if lan["interface"] and not _IFACE.fullmatch(lan["interface"]):
-        raise ValueError("Nom d'interface LAN invalide")
+    if not isinstance(lan["interface"], str) or not _IFACE.fullmatch(lan["interface"]):
+        raise ValueError("Nom d'interface du réseau local invalide")
     if not _IFACE.fullmatch(up["interface"]):
         raise ValueError("Nom d'interface uplink invalide")
 
@@ -123,16 +115,6 @@ def _validate(cfg):
 
     _validate_extras(cfg)
 
-    ssid, pw = ap["ssid"], ap["password"]
-    if not isinstance(ssid, str) or not 1 <= len(ssid.encode()) <= 32 \
-            or any(ord(c) < 32 or ord(c) == 127 for c in ssid):
-        raise ValueError("SSID : 1 à 32 caractères")
-    if not isinstance(pw, str) or not 8 <= len(pw) <= 63 or not all(32 <= ord(c) < 127 for c in pw):
-        raise ValueError("Mot de passe Wi-Fi : 8 à 63 caractères ASCII")
-    if not isinstance(ap["country"], str) or not _COUNTRY.fullmatch(ap["country"]):
-        raise ValueError("Pays : code à 2 lettres majuscules (ex. FR)")
-    if not 1 <= int(ap["fallback_channel"]) <= 13:
-        raise ValueError("Canal de repli : 1 à 13")
     port, http_port = int(web["port"]), int(web["http_port"])
     reserved = (22, 53, 67, 5353)
     if not 1 <= port <= 65535 or port in reserved:

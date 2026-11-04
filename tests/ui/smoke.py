@@ -57,43 +57,26 @@ class UiTests(unittest.TestCase):
         self.assertFalse(r["wizardOpen"], "l'assistant ne s'ouvre pas quand la configuration est terminée")
         self.assertIn("Forfait : 82 %", r["warnings"])
 
-    def test_tools_and_qr_code(self):
+    def test_tools_dialog(self):
         r, _ = self.run_scenario("tools")
-        self.assertTrue(r["toolsOpen"] and r["qrOpen"] and r["toolsClosed"])
+        self.assertTrue(r["toolsOpen"] and r["toolsClosed"])
         self.assertEqual(sorted(r["links"]), ["/api/backup", "/api/diagnostic"])
-        self.assertTrue(r["qrSrc"].startswith("/api/qr.svg"))
-        self.assertIn("MaBox", r["qrText"])
+        self.assertNotIn("QR code du Wi-Fi", r["buttons"], "plus de hotspot, plus de QR code")
 
-    def test_first_run_wizard_applies_the_hotspot_only_at_the_very_end(self):
-        """Régression : l'assistant est utilisé PAR le hotspot ; changer son nom/mot de passe coupe la connexion.
-        Rien ne doit donc être appliqué avant la dernière étape."""
+    def test_first_run_wizard_has_two_steps_and_saves_only_at_the_end(self):
         r, log = self.run_scenario("wizard")
         self.assertTrue(r["openedByItself"], "l'assistant s'ouvre tout seul au premier démarrage")
-        self.assertTrue(r["title1"].startswith("1/3 · La connexion 5G"))
+        self.assertTrue(r["title1"].startswith("1/2 · La connexion 5G"))
         self.assertEqual(r["networks"], 2)
         self.assertIn("mot de passe", r["errNoPw"].lower())
-        self.assertTrue(r["title2"].startswith("2/3 · Le hotspot"))
-        self.assertIn("8 caractères", r["errEmpty"])
-        self.assertTrue(r["title3"].startswith("3/3"))
-        self.assertIn("Ouifi", r["warning"])
-        self.assertIn("déconnecté", r["warning"])
-        self.assertTrue(r["connectPosted"], "la 5G est connectée avant que le hotspot change")
-        self.assertEqual(r["settingsBeforeFinish"], 0, "AUCUN réglage du hotspot n'est envoyé avant « Terminer »")
+        self.assertTrue(r["title2"].startswith("2/2 · Terminé"))
+        self.assertIn("borne", r["body2"], "on rappelle que la borne Wi-Fi se configure à part")
+        self.assertTrue(r["connectPosted"])
+        self.assertEqual(r["settingsBeforeFinish"], 0)
         self.assertTrue(r["closed"])
-        self.assertEqual(len(r["alerts"]), 1)
-        self.assertIn("Ouifi", r["alerts"][0], "on dit à l'utilisateur sur quel Wi-Fi se reconnecter")
         posts = [(e["path"], e["body"]) for e in log]
         self.assertIn(("/api/wifi/connect", {"ssid": "Routeur-4G", "password": "motdepasse-5g"}), posts)
-        self.assertEqual([b for p, b in posts if p == "/api/settings"],
-                         [{"ap": {"ssid": "Ouifi", "password": "motdepasse-box", "enabled": True}, "setup": {"done": True}}],
-                         "un seul envoi, à la fin : hotspot + assistant terminé")
-
-    def test_wizard_survives_the_wifi_cut_during_the_uplink_connection(self):
-        """Connecter l'iPhone fait changer le hotspot de canal : la réponse HTTP ne revient jamais. L'assistant doit
-        attendre le retour du routeur, constater que la 5G est connectée, et continuer."""
-        r, _ = self.run_scenario("wizard-cut")
-        self.assertTrue(r["title"].startswith("2/3 · Le hotspot"), "il est passé à l'étape suivante malgré la coupure")
-        self.assertEqual(r["err"], "")
+        self.assertEqual([b for p, b in posts if p == "/api/settings"], [{"setup": {"done": True}}])
 
     def test_speedtest_runs_polls_and_prefills_the_anti_latency_rates(self):
         r, log = self.run_scenario("speedtest")

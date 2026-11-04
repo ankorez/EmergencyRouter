@@ -11,9 +11,7 @@ async function api(path, body, timeoutMs = 25000) {
   let r;
   try { r = await fetch(path, {...opt, signal: ctl.signal}); }
   catch (e) {
-    const err = new Error("Le routeur ne répond pas (le Wi-Fi s'est peut-être coupé quelques secondes).");
-    err.network = true;                                          // distingue une coupure d'une erreur renvoyée par le routeur
-    throw err;
+    throw new Error("Le routeur ne répond pas.");
   } finally { clearTimeout(timer); }
   const j = await r.json().catch(() => ({}));
   if (r.status === 401 && path !== "/api/login") { boot(); throw new Error("Session expirée"); }
@@ -66,7 +64,7 @@ $("#sshBtn").onclick = () => {
   $("#sshStatus").textContent = ssh.active ? "Le serveur SSH est en marche."
     : ssh.enabled ? "Activé, mais le serveur n'a pas pu démarrer." : "Le serveur SSH est éteint.";
   $("#sshPw").placeholder = ssh.password_set ? "Laisser vide pour ne pas le changer" : "Choisis un mot de passe (12 caractères min.)";
-  $("#sshHelp").textContent = `Joignable uniquement depuis le hotspot ou le câble Ethernet du routeur : ssh ${ssh.user}@192.168.1.1. ` +
+  $("#sshHelp").textContent = `Joignable uniquement depuis le réseau local (Ethernet ou borne Wi-Fi derrière le switch) : ssh ${ssh.user}@192.168.1.1. ` +
     "Changer le mot de passe écrit brièvement sur la carte (une seconde).";
   $("#sshDlg").showModal();
 };
@@ -99,19 +97,18 @@ async function refresh() {
   $("#upSub").textContent = u.connected ? u.ssid : "Choisis un réseau ci-dessous";
   $("#upKv").innerHTML = u.connected ? kv([["Signal", (u.signal ?? "?") + " %"],
     ["Canal", `${u.channel} (${(u.freq / 1000).toFixed(1)} GHz)`], ["IP", u.ip || "—"]]) : "";
-  const a = s.ap;
-  $("#apDot").className = "dot " + (!a.enabled ? "" : a.active ? "ok" : "bad");
-  $("#apTitle").textContent = !a.enabled ? "Désactivé" : a.active ? "Actif" : "Arrêté";
-  $("#apSub").textContent = a.enabled ? a.ssid : "";
-  $("#apKv").innerHTML = kv([["Canal", a.channel], ["Routeur", s.lan.address], ["Appareils", s.lan.clients], ["Uptime", fmtUp(s.uptime)]]);
+  const l = s.lan;
+  $("#lanDot").className = "dot " + (l.link === false ? "bad" : l.link ? "ok" : "");
+  $("#lanTitle").textContent = l.link === false ? "Câble absent" : l.link ? "Câble branché" : "Inconnu";
+  $("#lanSub").textContent = l.interface || "";
+  $("#lanKv").innerHTML = kv([["Routeur", l.address], ["Appareils", l.clients], ["Uptime", fmtUp(s.uptime)]]);
   const w = $("#warnings"); w.hidden = !s.warnings.length; w.innerHTML = s.warnings.map(esc).join("<br>");
   renderSsh(s.ssh);
   renderBuild(s.build);
   renderTls(s.tls);
   const c = await api("/api/clients");
-  $("#clients").innerHTML = c.clients.map(x => `<tr><td>${esc(x.hostname || "—")}</td><td>${esc(x.ip)}</td><td>${esc(x.mac)}</td>` +
-    `<td><span class="tag">${x.wifi ? "Wi-Fi" : "Ethernet"}</span></td></tr>`).join("")
-    || `<tr><td colspan="4" class="muted">Aucun appareil</td></tr>`;
+  $("#clients").innerHTML = c.clients.map(x => `<tr><td>${esc(x.hostname || "—")}</td><td>${esc(x.ip)}</td><td>${esc(x.mac)}</td></tr>`).join("")
+    || `<tr><td colspan="3" class="muted">Aucun appareil</td></tr>`;
 }
 
 async function loadNetworks(rescan) {
@@ -149,8 +146,6 @@ async function join(ssid, password) {
 
 async function loadSettings() {
   const s = await api("/api/settings");
-  $("#apSsid").value = s.ap.ssid; $("#apPw").value = s.ap.password; $("#apCountry").value = s.ap.country;
-  $("#apChan").value = s.ap.fallback_channel; $("#apOn").checked = s.ap.enabled;
   $("#lanAddr").value = s.lan.address; $("#lanStart").value = s.lan.dhcp_start; $("#lanEnd").value = s.lan.dhcp_end;
   $("#lanDns").value = s.lan.dns.join(", ");
 }
@@ -158,11 +153,6 @@ async function save(body) {
   try { await api("/api/settings", body); toast("Enregistré, application en cours…"); setTimeout(refresh, 7000); }
   catch (e) { toast(e.message); }
 }
-$("#apForm").onsubmit = e => {
-  e.preventDefault();
-  save({ap: {ssid: $("#apSsid").value, password: $("#apPw").value, country: $("#apCountry").value.toUpperCase(),
-    fallback_channel: +$("#apChan").value, enabled: $("#apOn").checked}});
-};
 $("#lanForm").onsubmit = e => {
   e.preventDefault();
   save({lan: {address: $("#lanAddr").value, dhcp_start: $("#lanStart").value, dhcp_end: $("#lanEnd").value,

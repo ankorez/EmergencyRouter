@@ -1,6 +1,6 @@
 # Config embarquée dans l'image flashable (premier démarrage).
-# Le hotspot « de configuration » sert uniquement à régler le routeur : change SSID et mot de passe
-# depuis l'interface web (https://192.168.1.1/ ou https://erouter.local/) dès le premier accès.
+# Le Wi-Fi du Pi sert uniquement à joindre la 5G partagée du téléphone ; le réseau local passe par Ethernet (eth0).
+# Premier accès : brancher un PC ou la borne Wi-Fi sur le switch, puis https://192.168.1.1/
 lan:
   address: 192.168.1.1/24
   interface: eth0
@@ -8,12 +8,6 @@ lan:
   dhcp_end: 192.168.1.250
   lease: 12h
   dns: [1.1.1.1, 9.9.9.9]
-ap:
-  enabled: true
-  ssid: ERouter-Setup
-  password: erouter-setup
-  country: FR
-  fallback_channel: 6
 uplink:
   interface: wlan0
 web:

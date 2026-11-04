@@ -3,8 +3,7 @@ async function scenario() {
   document.getElementById("toolsBtn").click(); await sleep(200);
   const toolsOpen = document.getElementById("toolsDlg").open;
   const links = [...document.querySelectorAll("#toolsDlg a.btn")].map(a => a.getAttribute("href"));
-  document.getElementById("toolQr").click(); await sleep(300);
-  const qrOpen = document.getElementById("qrDlg").open, toolsClosed = !document.getElementById("toolsDlg").open;
-  const qrSrc = document.getElementById("qrImg").getAttribute("src"), qrText = document.getElementById("qrText").textContent;
-  report({toolsOpen, links, qrOpen, toolsClosed, qrSrc, qrText});
+  const buttons = [...document.querySelectorAll("#toolsDlg button")].map(b => b.textContent);
+  document.getElementById("toolsClose").click(); await sleep(200);
+  report({toolsOpen, links, buttons, toolsClosed: !document.getElementById("toolsDlg").open});
 }

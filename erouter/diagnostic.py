@@ -9,7 +9,7 @@ import yaml
 from . import __version__, system
 
 SECRET_KEYS = frozenset({"password", "password_hash", "secret"})
-UNITS = ("erouter-data", "erouter-agent", "erouter-web", "erouter-hostapd", "erouter-dnsmasq")
+UNITS = ("erouter-data", "erouter-agent", "erouter-web", "erouter-dnsmasq")
 MAX_SECTION = 20000
 _SECRETISH = re.compile(r"(passw|passphrase|psk|secret)", re.I)
 
@@ -26,7 +26,7 @@ def redact_config(cfg):
 
 
 def secret_values(cfg):
-    values = [cfg["ap"]["password"], cfg["web"]["password_hash"], cfg["web"]["secret"]]
+    values = [cfg["web"]["password_hash"], cfg["web"]["secret"]]
     return [v for v in values if isinstance(v, str) and len(v) >= 4]
 
 

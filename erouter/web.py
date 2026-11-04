@@ -21,7 +21,6 @@ log = logging.getLogger("erouter.web")
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 BUILD_INFO = os.environ.get("EROUTER_BUILD_INFO", "/usr/share/erouter/build-info.json")
-DEFAULT_AP_PASSWORDS = ("erouter-setup", "changeme123")   # mots de passe de démonstration, publics
 PASSWORD_MIN, PASSWORD_MAX = 8, 128      # le maximum évite de faire calculer un hash sur une entrée géante
 MAX_FAILURES, FAILURE_WINDOW = 5, 60     # 5 échecs par minute et par adresse
 _BOOT_SECRET = secrets.token_hex(32)     # secours si l'agent n'a pas encore créé le secret persistant
@@ -232,12 +231,8 @@ def change_password():
 def status():
     cfg = _cfg()
     s = rpc.call("status")
-    s["lan"] = {"address": cfg["lan"]["address"], "clients": s.pop("clients")}
-    s["ap"]["ssid"] = cfg["ap"]["ssid"]
+    s["lan"] = {**s.get("lan", {}), "address": cfg["lan"]["address"], "clients": s.pop("clients")}
     s["build"] = build_info()
-    if cfg["ap"]["password"] in DEFAULT_AP_PASSWORDS:
-        s["warnings"].append("Le hotspot utilise encore un mot de passe par défaut, connu de tous : "
-                             "change-le dans « Réglages du hotspot ».")
     return jsonify(s)
 
 
@@ -273,7 +268,6 @@ def wifi_forget():
 
 
 SETTINGS = {                     # section -> clés que l'interface a le droit de modifier
-    "ap": ("enabled", "ssid", "password", "country", "fallback_channel"),
     "lan": ("address", "dhcp_start", "dhcp_end", "lease", "dns"),
     "usage": ("plan_gb", "alert_percent", "reset_day"),
     "savings": ("block_ads", "limits"),
@@ -390,20 +384,6 @@ def restore():
     except (ValueError, RuntimeError) as e:
         return err(e)
     return jsonify(ok=True, relogin=new["web"]["password_hash"] != current["web"]["password_hash"])
-
-
-@app.get("/api/qr.svg")
-@auth
-def qr_code():
-    try:
-        from . import qr
-        cfg = _cfg()
-        svg = qr.svg(qr.wifi_payload(cfg["ap"]["ssid"], cfg["ap"]["password"]))
-    except ImportError:
-        return err("QR code indisponible (paquet python3-qrcode manquant)", 501)
-    resp = Response(svg, mimetype="image/svg+xml")
-    resp.headers["Cache-Control"] = "no-store"
-    return resp
 
 
 @app.get("/api/clients")

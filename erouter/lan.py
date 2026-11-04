@@ -1,4 +1,8 @@
-"""Applique la config réseau : pont br0, ap0, hostapd, dnsmasq, nftables."""
+"""Applique la config réseau : adresse du routeur sur le port Ethernet, dnsmasq (DHCP/DNS), nftables.
+
+Le Wi-Fi du Pi ne sert qu'à se connecter à la 5G (uplink). Le réseau local passe par le port Ethernet, vers un switch et
+une borne Wi-Fi indépendante (par exemple UniFi) configurée à part.
+"""
 import gzip
 import ipaddress
 import logging
@@ -15,12 +19,8 @@ RUN_DIR = "/run/erouter"
 BLOCKLIST_GZ = os.path.join(os.path.dirname(__file__), "data", "blocklist.hosts.gz")
 BLOCKLIST_RUN = os.path.join(RUN_DIR, "blocklist.hosts")
 LEASES = "/run/erouter/dnsmasq.leases"   # en RAM : pas d'écriture sur la carte SD
-BRIDGE = "br0"
-AP_IF = "ap0"
 _env = Environment(loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "templates")),
                    keep_trailing_newline=True)
-
-_current_ap = None  # (enabled, ssid, password, country, channel) réellement appliqué
 
 
 def _write(name, content, mode=0o600):
@@ -32,25 +32,32 @@ def _write(name, content, mode=0o600):
     return path
 
 
-def apply_bridge(cfg):
-    lan = cfg["lan"]
-    if not system.iface_exists(BRIDGE):
-        system.run(["ip", "link", "add", BRIDGE, "type", "bridge"], check=True)
-    if system.iface_ip(BRIDGE) != str(ipaddress.ip_interface(lan["address"])):
-        system.run(["ip", "addr", "flush", "dev", BRIDGE])
-        system.run(["ip", "addr", "add", lan["address"], "dev", BRIDGE], check=True)
-    system.run(["ip", "link", "set", BRIDGE, "up"], check=True)
-    eth = lan.get("interface")
-    if system.iface_exists(eth):
-        system.run(["ip", "link", "set", eth, "master", BRIDGE])
-        system.run(["ip", "link", "set", eth, "up"])
+def lan_if(cfg):
+    return cfg["lan"]["interface"]
 
 
-def ensure_ap_iface(cfg):
-    if system.iface_exists(AP_IF):
-        return
-    up = cfg["uplink"]["interface"]
-    system.run(["iw", "dev", up, "interface", "add", AP_IF, "type", "__ap"], check=True)
+def _remove_legacy_hotspot(eth):
+    """Mise à jour d'une ancienne version : le pont br0 (Ethernet + hotspot interne) et l'interface ap0 n'existent plus."""
+    if system.iface_exists("br0"):
+        system.run(["ip", "link", "set", eth, "nomaster"])
+        system.run(["ip", "link", "del", "br0"])
+        log.info("ancien pont br0 supprimé")
+    if system.iface_exists("ap0"):
+        system.run(["iw", "dev", "ap0", "del"])
+        log.info("ancienne interface du hotspot (ap0) supprimée")
+
+
+def apply_interface(cfg):
+    """Donne l'adresse du routeur au port Ethernet et le monte."""
+    eth = lan_if(cfg)
+    if not system.iface_exists(eth):
+        raise RuntimeError(f"interface réseau local « {eth} » introuvable")
+    _remove_legacy_hotspot(eth)
+    wanted = str(ipaddress.ip_interface(cfg["lan"]["address"]))
+    if system.iface_ip(eth) != wanted:
+        system.run(["ip", "-4", "addr", "flush", "dev", eth])
+        system.run(["ip", "addr", "add", wanted, "dev", eth], check=True)
+    system.run(["ip", "link", "set", eth, "up"], check=True)
 
 
 def prepare_blocklist(cfg):
@@ -84,7 +91,7 @@ def apply_dnsmasq(cfg):
     lan = cfg["lan"]
     ip = ipaddress.ip_interface(lan["address"])
     conf = _env.get_template("dnsmasq.conf.j2").render(
-        bridge=BRIDGE, gateway=str(ip.ip), netmask=str(ip.netmask),
+        lan_if=lan_if(cfg), gateway=str(ip.ip), netmask=str(ip.netmask),
         start=lan["dhcp_start"], end=lan["dhcp_end"], lease=lan["lease"],
         dns=lan["dns"], leases=LEASES, blocklist=prepare_blocklist(cfg))
     _write("dnsmasq.conf", conf, 0o644)
@@ -100,42 +107,18 @@ def web_ports(cfg):
 
 def apply_firewall(cfg):
     conf = _env.get_template("nftables.conf.j2").render(
-        bridge=BRIDGE, uplink=cfg["uplink"]["interface"], web_ports=web_ports(cfg),
+        lan_if=lan_if(cfg), uplink=cfg["uplink"]["interface"], web_ports=web_ports(cfg),
         lan_net=str(ipaddress.ip_interface(cfg["lan"]["address"]).network), limits=limit_rules(cfg))
     path = _write("nftables.conf", conf, 0o600)
     system.run(["nft", "-f", path], check=True)
 
 
-def apply_ap(cfg, channel):
-    """(Re)démarre hostapd sur le canal demandé si quelque chose a changé."""
-    global _current_ap
-    ap = cfg["ap"]
-    wanted = (bool(ap["enabled"]), ap["ssid"], ap["password"], ap["country"], int(channel))
-    if wanted == _current_ap and (not ap["enabled"] or system.hostapd_active()):
-        return False
-    _current_ap = wanted
-    if not ap["enabled"]:
-        system.run(["systemctl", "stop", "erouter-hostapd"])
-        return True
-    ensure_ap_iface(cfg)
-    conf = _env.get_template("hostapd.conf.j2").render(
-        iface=AP_IF, bridge=BRIDGE, ssid=ap["ssid"], password=ap["password"],
-        country=ap["country"], channel=int(channel), hw_mode="g" if int(channel) <= 14 else "a")
-    _write("hostapd.conf", conf, 0o600)
-    system.run(["systemctl", "restart", "erouter-hostapd"])
-    return True
-
-
-def apply_base(cfg, parts=("bridge", "dnsmasq", "firewall")):
-    """Applique les parties demandées, dans l'ordre : le DNS a besoin du pont, le pare-feu des interfaces."""
-    if "bridge" in parts:
+def apply_base(cfg, parts=("interface", "dnsmasq", "firewall")):
+    """Applique les parties demandées, dans l'ordre : le DNS a besoin de l'adresse, le pare-feu des interfaces."""
+    if "interface" in parts:
         system.run(["rfkill", "unblock", "wlan"])
-        apply_bridge(cfg)
+        apply_interface(cfg)
     if "dnsmasq" in parts:
         apply_dnsmasq(cfg)
     if "firewall" in parts:
         apply_firewall(cfg)
-
-
-def current_ap():
-    return _current_ap

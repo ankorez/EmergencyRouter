@@ -13,9 +13,9 @@ section() { echo; echo "== $*"; }
 section "Installation des outils"
 apt-get update -qq >/dev/null 2>&1
 apt-get install -y -qq --no-install-recommends python3 python3-flask python3-yaml python3-jinja2 python3-gunicorn \
-  openssl nftables dnsmasq-base hostapd systemd shellcheck ca-certificates curl e2fsprogs fdisk mtools dosfstools \
+  openssl nftables dnsmasq-base systemd shellcheck ca-certificates curl e2fsprogs fdisk mtools dosfstools \
   mount util-linux xz-utils python3-pyflakes procps iproute2 openssh-client openssh-server \
-  python3-qrcode librsvg2-bin zbar-tools bind9-dnsutils iputils-ping >/dev/null 2>&1 || { echo "apt a échoué"; exit 1; }
+  bind9-dnsutils iputils-ping >/dev/null 2>&1 || { echo "apt a échoué"; exit 1; }
 python3 -c "from importlib.metadata import version as v; print('python', __import__('sys').version.split()[0], '| flask', v('flask'), '| gunicorn', v('gunicorn'), '|', end=' ')"
 openssl version
 id erouter >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin erouter
@@ -28,18 +28,18 @@ echo "$out" | sed 's/^/    /'
 echo "$out" | grep -q "^OK" && ok "tests unitaires" || bad "tests unitaires"
 echo "$out" | grep -q "skipped" && bad "des tests ont été ignorés (openssl ?)"
 
-section "Pare-feu, dnsmasq, hostapd, systemd, shell"
+section "Pare-feu, dnsmasq, systemd, shell"
 python3 -B - <<'PY'
 from jinja2 import Environment, FileSystemLoader
 e = Environment(loader=FileSystemLoader('/work/erouter/templates'))
-open('/tmp/nft.conf', 'w').write(e.get_template('nftables.conf.j2').render(bridge='br0', uplink='wlan0', web_ports=[443, 80], lan_net='192.168.1.0/24'))
-open('/tmp/dnsmasq.conf', 'w').write(e.get_template('dnsmasq.conf.j2').render(bridge='br0', gateway='192.168.1.1', netmask='255.255.255.0', start='192.168.1.100', end='192.168.1.250', lease='12h', dns=['1.1.1.1'], leases='/tmp/leases'))
+open('/tmp/nft.conf', 'w').write(e.get_template('nftables.conf.j2').render(lan_if='lan0', uplink='wlan0', web_ports=[443, 80], lan_net='192.168.1.0/24'))
+open('/tmp/dnsmasq.conf', 'w').write(e.get_template('dnsmasq.conf.j2').render(lan_if='lan0', gateway='192.168.1.1', netmask='255.255.255.0', start='192.168.1.100', end='192.168.1.250', lease='12h', dns=['1.1.1.1'], leases='/tmp/leases'))
 PY
 check "nft -c (syntaxe du pare-feu)" nft -c -f /tmp/nft.conf
 check "dnsmasq --test" dnsmasq --test --conf-file=/tmp/dnsmasq.conf
 mkdir -p /opt/erouter && cp -r /work/erouter /opt/erouter/ && touch /usr/local/sbin/erouter-data && chmod +x /usr/local/sbin/erouter-data
 verify=$(systemd-analyze verify /work/systemd/erouter-*.service 2>&1 | grep -v "^$")
-[ -z "$verify" ] && ok "systemd-analyze verify (5 unités)" || { bad "systemd-analyze verify"; echo "$verify" | sed 's/^/    /'; }
+[ -z "$verify" ] && ok "systemd-analyze verify (unités)" || { bad "systemd-analyze verify"; echo "$verify" | sed 's/^/    /'; }
 sc=$(shellcheck -S warning -e SC2154 install.sh build-image.sh scripts/erouter-fs scripts/erouter-data image/postprocess.sh \
   image/stage-erouter/prerun.sh image/stage-erouter/00-install/00-run.sh tests/integration/check.sh tests/integration/firewall.sh 2>&1)
 [ -z "$sc" ] && ok "shellcheck" || { bad "shellcheck"; echo "$sc" | head -30 | sed 's/^/    /'; }
@@ -269,7 +269,7 @@ st = speedtest.Speedtest(); st._run('lo'); r = st.status()['result']; print(r['e
 echo "$out" | grep -q "Aucune réponse" && ok "serveur injoignable : erreur claire, pas de plantage" || bad "serveur injoignable : $out"
 
 section "Blocage des publicités avec un vrai dnsmasq et la vraie liste"
-ip link add br0 type bridge 2>/dev/null; ip addr add 10.1.0.1/24 dev br0 2>/dev/null; ip link set br0 up
+ip link add lan0 type dummy 2>/dev/null; ip addr add 10.1.0.1/24 dev lan0 2>/dev/null; ip link set lan0 up
 mkdir -p /tmp/adb && python3 -B - <<'PY'
 import sys; sys.path.insert(0, "/work")
 import copy, gzip, os
@@ -280,13 +280,13 @@ path = lan.prepare_blocklist(cfg)
 from jinja2 import Environment, FileSystemLoader
 env = Environment(loader=FileSystemLoader("/work/erouter/templates"))
 open("/tmp/adb/dnsmasq.conf", "w").write(env.get_template("dnsmasq.conf.j2").render(
-    bridge="br0", gateway="10.1.0.1", netmask="255.255.255.0", start="10.1.0.100", end="10.1.0.200", lease="1h",
+    lan_if="lan0", gateway="10.1.0.1", netmask="255.255.255.0", start="10.1.0.100", end="10.1.0.200", lease="1h",
     dns=["192.0.2.53"], leases="/tmp/adb/leases", blocklist=path))
 open("/tmp/adb/domain", "w").write(open(path).readline().split()[1])
 print("liste décompressée :", sum(1 for _ in open(path)), "domaines")
 PY
 check "dnsmasq --test avec la vraie liste" dnsmasq --test --conf-file=/tmp/adb/dnsmasq.conf
-(dnsmasq --keep-in-foreground --conf-file=/tmp/adb/dnsmasq.conf --port=5354 --no-dhcp-interface=br0 >/tmp/adb/dnsmasq.log 2>&1 &)
+(dnsmasq --keep-in-foreground --conf-file=/tmp/adb/dnsmasq.conf --port=5354 --no-dhcp-interface=lan0 >/tmp/adb/dnsmasq.log 2>&1 &)
 sleep 3
 blocked=$(cat /tmp/adb/domain)
 ans=$(dig +short +time=2 +tries=1 @10.1.0.1 -p 5354 "$blocked" A)
@@ -295,26 +295,11 @@ ans=$(dig +short +time=2 +tries=1 @10.1.0.1 -p 5354 example.org A)
 [ "$ans" != "0.0.0.0" ] && ok "domaine normal (example.org) : non bloqué" || bad "example.org bloqué"
 pkill dnsmasq; true
 
-section "QR code du Wi-Fi décodé par un lecteur de QR"
-n=0
-for pair in "MaBox|motdepasse-simple" "Ouifi|p:a\\ss,\"x;y" "Ma;Box|tres-long-mot-de-passe-0123456789-0123456789-0123456789-abcdef" "Café 5G ☕|mot-de-passe-?!"; do
-  ssid="${pair%%|*}"; pw="${pair#*|}"
-  PYTHONPATH=/work SSID="$ssid" PW="$pw" python3 -B -c "
-import os; from erouter import qr
-payload = qr.wifi_payload(os.environ['SSID'], os.environ['PW'])
-open('/tmp/q.payload', 'w').write(payload); open('/tmp/q.svg', 'wb').write(qr.svg(payload))"
-  rsvg-convert -w 900 /tmp/q.svg -o /tmp/q.png 2>/dev/null
-  decoded=$(zbarimg --raw -q /tmp/q.png 2>/dev/null | head -1)
-  n=$((n + 1))
-  if [ "$decoded" = "$(cat /tmp/q.payload)" ]; then ok "QR $n décodé à l'identique : $decoded"; else bad "QR $n : attendu $(cat /tmp/q.payload), lu '$decoded'"; fi
-done
-
 section "Diagnostic : aucun secret, même avec de vraies commandes"
 EROUTER_DATA=/tmp/diag EROUTER_CONFIG=/tmp/diag/erouter/config.yaml PYTHONPATH=/work python3 -B - <<'PY'
 import copy, sys
 from erouter import config, diagnostic
 cfg = config.sanitize(config.DEFAULTS)
-cfg["ap"]["password"] = "Mot-de-passe-secret-du-hotspot"
 cfg["web"]["password_hash"] = "scrypt:32768:8:1$sel$empreinte-secrete"
 cfg["web"]["secret"] = "s" * 64
 text = diagnostic.collect(cfg, {"uplink": {"ssid": "Partage"}}, {"version": "0.1.0"})
@@ -323,7 +308,7 @@ print(len(text))
 PY
 size=$(wc -c < /tmp/diag.txt)
 [ "$size" -gt 1500 ] && ok "diagnostic produit ($size octets, commandes réelles exécutées)" || bad "diagnostic trop court ($size)"
-for secret in "Mot-de-passe-secret-du-hotspot" "empreinte-secrete" "ssssssssssssssss"; do
+for secret in "empreinte-secrete" "ssssssssssssssss"; do
   grep -q "$secret" /tmp/diag.txt && bad "le diagnostic contient un secret ($secret)" || ok "absent du diagnostic : ${secret:0:16}…"
 done
 grep -q "### Pare-feu" /tmp/diag.txt && grep -q "### Adresses" /tmp/diag.txt && ok "sections réseau présentes" || bad "sections manquantes"

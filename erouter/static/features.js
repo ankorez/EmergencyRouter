@@ -157,7 +157,6 @@ async function loadClients() {
 $("#toolsBtn").onclick = () => { $("#toolsErr").textContent = ""; $("#toolsDlg").showModal(); };
 $("#toolsClose").onclick = () => $("#toolsDlg").close();
 $("#toolWizard").onclick = () => { $("#toolsDlg").close(); openWizard(); };
-$("#toolQr").onclick = () => { $("#toolsDlg").close(); openQr(); };
 $("#restoreFile").onchange = async e => {
   const file = e.target.files[0]; e.target.value = "";
   if (!file) return;
@@ -169,54 +168,38 @@ $("#restoreFile").onchange = async e => {
     if (r.relogin) boot(); else { await loadSettingsAll(); refresh(); }
   } catch (err) { $("#toolsErr").textContent = err instanceof SyntaxError ? "Ce fichier n'est pas une sauvegarde valide." : err.message; }
 };
-function openQr() {
-  $("#qrText").textContent = `Réseau « ${settings?.ap.ssid ?? ""} » : scanne ce code avec l'appareil photo d'un téléphone.`;
-  $("#qrImg").src = "/api/qr.svg?" + Date.now();
-  $("#qrDlg").showModal();
-}
-$("#qrClose").onclick = () => $("#qrDlg").close();
-
 // ---------- Assistant de premier démarrage ----------
-// IMPORTANT : on est connecté à cet assistant PAR le hotspot du routeur. Changer son nom ou son mot de passe coupe donc la
-// connexion : c'est la toute dernière chose que fait l'assistant. La 5G d'abord (elle peut aussi couper le Wi-Fi quelques
-// secondes : le hotspot change de canal pour suivre l'iPhone), le hotspot à la fin.
-const pause = ms => new Promise(r => setTimeout(r, ms));
-const wiz = {step: 0, ssid: "", password: "", networks: [], picked: "", connected: false, shown: false};
-const WIZ_TITLES = ["1/3 · La connexion 5G", "2/3 · Le hotspot", "3/3 · Terminé"];
-const hotspotChanges = () => !settings || wiz.ssid !== settings.ap.ssid || wiz.password !== settings.ap.password;
-function stepper() { return `<div class="step">${[0, 1, 2].map(i => `<i class="${i <= wiz.step ? "on" : ""}"></i>`).join("")}</div>`; }
+// L'assistant n'a qu'une chose à régler : la 5G (le Wi-Fi du Pi ne sert qu'à ça). Le réseau local passe par Ethernet,
+// donc se connecter à l'iPhone ne coupe jamais l'assistant.
+const wiz = {step: 0, networks: [], picked: "", connected: false, shown: false};
+const WIZ_TITLES = ["1/2 · La connexion 5G", "2/2 · Terminé"];
+function stepper() { return `<div class="step">${[0, 1].map(i => `<i class="${i <= wiz.step ? "on" : ""}"></i>`).join("")}</div>`; }
 function renderWizard() {
   $("#wizTitle").textContent = WIZ_TITLES[wiz.step];
   $("#wizErr").textContent = "";
   $("#wizPrev").hidden = wiz.step === 0;
   $("#wizNext").disabled = false;
-  $("#wizNext").textContent = wiz.step === 2 ? "Terminer" : "Suivant";
-  $("#wizSkip").hidden = wiz.step === 2;
+  $("#wizNext").textContent = wiz.step === 1 ? "Terminer" : "Suivant";
+  $("#wizSkip").hidden = wiz.step === 1;
   let html = stepper();
   if (wiz.step === 0) {
-    html += `<p class="muted small">Choisis le partage de connexion de ton téléphone (idéalement en 2,4 GHz) et <b>garde l'écran « Partage de connexion » ouvert</b> sur le téléphone pendant la recherche. Le Wi-Fi du routeur peut se couper quelques secondes pendant la connexion : l'assistant attend.</p>
+    html += `<p class="muted small">Choisis le partage de connexion de ton téléphone (idéalement en 2,4 GHz) et <b>garde l'écran « Partage de connexion » ouvert</b> sur le téléphone pendant la recherche.</p>
       <div class="list" id="wzNets">${wiz.networks.map(n => `<label class="item"><input type="radio" name="wzNet" value="${esc(n.ssid)}" ${wiz.picked === n.ssid ? "checked" : ""}>
         <span class="name">${esc(n.ssid)}</span><span class="tag">${n.freq > 4000 ? "5 GHz" : "2,4 GHz"}</span>${n.in_use ? '<span class="tag ok">connecté</span>' : ""}</label>`).join("")
         || `<div class="muted">${wiz.scanning ? "Recherche des réseaux…" : "Aucun réseau trouvé : active le partage de connexion puis actualise."}</div>`}</div>
       <button type="button" id="wzScan">Actualiser la liste</button>
       <label id="wzPwWrap" hidden>Mot de passe du réseau<input id="wzNetPw" type="password" autocomplete="off" maxlength="63"></label>
       <p class="muted small">Tu peux aussi passer cette étape et la faire plus tard.</p>`;
-  } else if (wiz.step === 1) {
-    html += `<p class="muted small">Le hotspot que ce routeur diffuse. Pour que tes appareils s'y connectent tout seuls, utilise le <b>même nom et le même mot de passe que ta box fibre</b>. Il ne sera appliqué qu'à la fin.</p>
-      <label>Nom du Wi-Fi (SSID)<input id="wzSsid" maxlength="32" value="${esc(wiz.ssid)}"></label>
-      <label>Mot de passe (8 caractères minimum)<input id="wzPw" type="text" autocomplete="off" maxlength="63" value="${esc(wiz.password)}"></label>`;
   } else {
-    html += `<p>${wiz.connected ? "La 5G est connectée." : "La 5G n'est pas encore connectée : tu pourras la choisir plus tard dans « Réseaux Wi-Fi »."}</p>` +
-      (hotspotChanges() ? `<p class="banner">En terminant, le hotspot devient <b>« ${esc(wiz.ssid)} »</b> avec le mot de passe que tu as choisi. <b>Ton appareil sera déconnecté</b> : reconnecte-toi à ce Wi-Fi, puis rouvre cette page.</p>` : `<p class="muted small">Le hotspot reste « ${esc(wiz.ssid)} ».</p>`) +
-      `<p class="muted small">Besoin d'un accès SSH ? Bouton « SSH » en haut de la page. Le bouton « Outils » regroupe le QR code du Wi-Fi, la sauvegarde et le diagnostic.</p>
-      <button type="button" id="wzQr">Afficher le QR code du Wi-Fi actuel</button>`;
+    html += `<p>${wiz.connected ? "La 5G est connectée." : "La 5G n'est pas encore connectée : tu pourras la choisir plus tard dans « Réseaux Wi-Fi »."}</p>
+      <p class="muted small">Le Wi-Fi des appareils est assuré par ta borne (UniFi…) branchée sur le switch : configure-la de ton côté avec le même nom et le même mot de passe que ta box fibre.</p>
+      <p class="muted small">Besoin d'un accès SSH ? Bouton « SSH » en haut de la page. Le bouton « Outils » regroupe la sauvegarde et le diagnostic.</p>`;
   }
   $("#wizBody").innerHTML = html;
   if (wiz.step === 0) {
     $("#wzScan").onclick = () => scanForWizard(true);
     $("#wizBody").onchange = e => { if (e.target.name === "wzNet") { wiz.picked = e.target.value; const n = wiz.networks.find(x => x.ssid === wiz.picked); $("#wzPwWrap").hidden = !(n && n.secured && !n.saved); } };
   }
-  if (wiz.step === 2) $("#wzQr").onclick = () => { $("#wizDlg").close(); openQr(); };
 }
 async function scanForWizard(rescan) {
   wiz.scanning = true; renderWizard();
@@ -227,13 +210,6 @@ async function scanForWizard(rescan) {
   } catch (e) { wiz.scanning = false; renderWizard(); $("#wizErr").textContent = e.message; return; }
   wiz.scanning = false; renderWizard();
 }
-async function waitForUplink(ssid, seconds) {
-  for (let i = 0; i < seconds / 2; i++) {
-    await pause(2000);
-    try { const s = await api("/api/status", undefined, 5000); if (s.uplink.connected && s.uplink.ssid === ssid) return true; } catch (e) { /* le Wi-Fi du routeur revient */ }
-  }
-  return false;
-}
 async function wizardNext() {
   $("#wizErr").textContent = "";
   if (wiz.step === 0) {
@@ -243,40 +219,27 @@ async function wizardNext() {
       if (n && n.secured && !n.saved && !pw) { $("#wizErr").textContent = "Saisis le mot de passe du réseau."; $("#wzPwWrap").hidden = false; return; }
       $("#wizNext").disabled = true; $("#wizNext").textContent = "Connexion…";
       try { await api("/api/wifi/connect", {ssid: wiz.picked, password: pw}, 90000); wiz.connected = true; }
-      catch (e) {
-        if (e.network) wiz.connected = await waitForUplink(wiz.picked, 40);      // coupure attendue : on attend que le routeur revienne
-        if (!wiz.connected) { $("#wizErr").textContent = e.network ? "Connexion non confirmée : vérifie le mot de passe et que le partage de connexion est actif." : e.message; renderWizardKeep(); return; }
-      }
+      catch (e) { $("#wizErr").textContent = e.message; renderWizardKeep(); return; }
     }
     wiz.step = 1; renderWizard(); return;
-  }
-  if (wiz.step === 1) {
-    wiz.ssid = $("#wzSsid").value.trim(); wiz.password = $("#wzPw").value;
-    if (!wiz.ssid || wiz.password.length < 8) { $("#wizErr").textContent = "Un nom et un mot de passe de 8 caractères minimum."; return; }
-    wiz.step = 2; renderWizard(); return;
   }
   await finishWizard();
 }
 function renderWizardKeep() { const err = $("#wizErr").textContent; renderWizard(); $("#wizErr").textContent = err; }
 async function finishWizard() {
-  const changed = hotspotChanges();
   $("#wizNext").disabled = true; $("#wizNext").textContent = "Application…";
-  try { await api("/api/settings", {ap: {ssid: wiz.ssid, password: wiz.password, enabled: true}, setup: {done: true}}); }
-  catch (e) {
-    if (!e.network) { $("#wizErr").textContent = e.message; $("#wizNext").disabled = false; $("#wizNext").textContent = "Terminer"; return; }
-    // coupure attendue : le hotspot vient de changer de nom
-  }
+  try { await api("/api/settings", {setup: {done: true}}); }
+  catch (e) { $("#wizErr").textContent = e.message; $("#wizNext").disabled = false; $("#wizNext").textContent = "Terminer"; return; }
   $("#wizDlg").close();
-  if (changed) alert(`Le hotspot s'appelle maintenant « ${wiz.ssid} ».\nReconnecte ton appareil à ce Wi-Fi avec le nouveau mot de passe, puis rouvre cette page.`);
-  else { loadSettingsAll(); refresh(); }
+  loadSettingsAll(); refresh();
 }
 function openWizard() {
-  Object.assign(wiz, {step: 0, ssid: settings?.ap.ssid ?? "", password: settings?.ap.password ?? "", picked: "", connected: false, networks: []});
+  Object.assign(wiz, {step: 0, picked: "", connected: false, networks: []});
   renderWizard(); $("#wizDlg").showModal(); scanForWizard(false);
 }
 $("#wizForm").onsubmit = e => { e.preventDefault(); wizardNext(); };
 $("#wizPrev").onclick = () => { wiz.step = Math.max(0, wiz.step - 1); if (wiz.step === 0 && !wiz.networks.length) scanForWizard(false); else renderWizard(); };
-$("#wizSkip").onclick = () => { if (wiz.step < 2) { wiz.step += 1; renderWizard(); } };
+$("#wizSkip").onclick = () => { if (wiz.step < 1) { wiz.step += 1; renderWizard(); } };
 $("#wizDlg").addEventListener("cancel", e => { e.preventDefault(); });   // pas de fermeture par Échap : « Passer » est explicite
 
 // ---------- Cycle de vie ----------
