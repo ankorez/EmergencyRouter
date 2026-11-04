@@ -20,7 +20,7 @@ fi
 apt-get update
 apt-get install -y --no-install-recommends \
   network-manager hostapd dnsmasq-base nftables iw rfkill iproute2 iputils-ping openssl \
-  python3 python3-flask python3-yaml python3-jinja2 python3-gunicorn wireless-regdb
+  python3 python3-flask python3-yaml python3-jinja2 python3-gunicorn python3-qrcode curl wireless-regdb
 
 echo "==> Utilisateur sans privilèges pour l'interface web"
 id erouter >/dev/null 2>&1 || adduser --system --group --no-create-home --shell /usr/sbin/nologin erouter
@@ -41,8 +41,11 @@ systemctl disable --now erouter.service 2>/dev/null || true
 rm -f /etc/systemd/system/erouter.service
 
 install -m 644 "$SRC"/systemd/erouter-*.service /etc/systemd/system/
-install -d /etc/NetworkManager/conf.d /etc/systemd/journald.conf.d /etc/sysctl.d
+install -d /etc/NetworkManager/conf.d /etc/systemd/journald.conf.d /etc/sysctl.d /etc/systemd/system.conf.d /etc/rpi/swap.conf.d
 install -m 644 "$SRC/systemd/90-erouter.conf" /etc/NetworkManager/conf.d/90-erouter.conf
+install -m 644 "$SRC/systemd/91-erouter-wifi.conf" /etc/NetworkManager/conf.d/91-erouter-wifi.conf
+install -m 644 "$SRC/systemd/91-erouter-watchdog.conf" /etc/systemd/system.conf.d/91-erouter-watchdog.conf
+install -m 644 "$SRC/systemd/90-erouter-swap.conf" /etc/rpi/swap.conf.d/90-erouter.conf
 install -m 644 "$SRC/systemd/journald-erouter.conf" /etc/systemd/journald.conf.d/erouter.conf
 install -m 644 "$SRC/systemd/90-erouter-sysctl.conf" /etc/sysctl.d/90-erouter.conf
 
@@ -81,4 +84,5 @@ IP=$(awk -F'[ /]+' '/address:/{print $3; exit}' /data/erouter/config.yaml)
 echo
 echo "Installé. Ouvre https://${IP:-192.168.1.1}/ depuis le LAN pour finir la configuration"
 echo "(avertissement du navigateur au premier accès : le certificat est auto-signé, compare son empreinte affichée en bas de page)."
+echo "Redémarre le Pi une fois : le swap sur la carte (/var/swap) est supprimé et le chien de garde matériel activé."
 echo "Logs : sudo journalctl -u erouter-agent -u erouter-web -u erouter-hostapd -u erouter-dnsmasq -n 80"

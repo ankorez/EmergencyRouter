@@ -4,7 +4,8 @@ except-interface=lo
 listen-address={{ gateway }}
 no-resolv
 no-hosts
-pid-file=
+{% if blocklist %}addn-hosts={{ blocklist }}
+{% endif %}pid-file=
 {% for s in dns %}server={{ s }}
 {% endfor %}
 dhcp-range={{ start }},{{ end }},{{ netmask }},{{ lease }}

@@ -1,12 +1,19 @@
 """Applique la config réseau : pont br0, ap0, hostapd, dnsmasq, nftables."""
+import gzip
 import ipaddress
+import logging
 import os
+import shutil
 
 from jinja2 import Environment, FileSystemLoader
 
 from . import system
 
+log = logging.getLogger("erouter.lan")
+
 RUN_DIR = "/run/erouter"
+BLOCKLIST_GZ = os.path.join(os.path.dirname(__file__), "data", "blocklist.hosts.gz")
+BLOCKLIST_RUN = os.path.join(RUN_DIR, "blocklist.hosts")
 LEASES = "/run/erouter/dnsmasq.leases"   # en RAM : pas d'écriture sur la carte SD
 BRIDGE = "br0"
 AP_IF = "ap0"
@@ -46,13 +53,40 @@ def ensure_ap_iface(cfg):
     system.run(["iw", "dev", up, "interface", "add", AP_IF, "type", "__ap"], check=True)
 
 
+def prepare_blocklist(cfg):
+    """Chemin de la liste de blocage décompressée en mémoire (/run), ou None si le blocage est désactivé."""
+    if not cfg["savings"]["block_ads"]:
+        return None
+    if not os.path.isfile(BLOCKLIST_GZ):
+        log.warning("liste de blocage absente : blocage désactivé")
+        return None
+    os.makedirs(RUN_DIR, exist_ok=True)
+    if not os.path.isfile(BLOCKLIST_RUN) or os.path.getmtime(BLOCKLIST_RUN) < os.path.getmtime(BLOCKLIST_GZ):
+        tmp = BLOCKLIST_RUN + ".tmp"
+        with gzip.open(BLOCKLIST_GZ, "rb") as src, open(tmp, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+        os.replace(tmp, BLOCKLIST_RUN)
+    return BLOCKLIST_RUN
+
+
+def limit_rules(cfg):
+    """Plafonds de débit par appareil, traduits en règles : on retrouve l'adresse IP actuelle de chaque MAC (baux DHCP)."""
+    ips = {c["mac"]: c["ip"] for c in system.clients(LEASES)}
+    rules = []
+    for lim in cfg["savings"]["limits"]:
+        if lim["mac"] in ips:
+            rules.append({"mac": lim["mac"], "ip": ips[lim["mac"]],
+                          "up_kbytes": int(lim["up_mbit"]) * 125, "down_kbytes": int(lim["down_mbit"]) * 125})   # Mbit/s -> ko/s
+    return rules
+
+
 def apply_dnsmasq(cfg):
     lan = cfg["lan"]
     ip = ipaddress.ip_interface(lan["address"])
     conf = _env.get_template("dnsmasq.conf.j2").render(
         bridge=BRIDGE, gateway=str(ip.ip), netmask=str(ip.netmask),
         start=lan["dhcp_start"], end=lan["dhcp_end"], lease=lan["lease"],
-        dns=lan["dns"], leases=LEASES)
+        dns=lan["dns"], leases=LEASES, blocklist=prepare_blocklist(cfg))
     _write("dnsmasq.conf", conf, 0o644)
     system.run(["systemctl", "restart", "erouter-dnsmasq"])
 
@@ -67,7 +101,7 @@ def web_ports(cfg):
 def apply_firewall(cfg):
     conf = _env.get_template("nftables.conf.j2").render(
         bridge=BRIDGE, uplink=cfg["uplink"]["interface"], web_ports=web_ports(cfg),
-        lan_net=str(ipaddress.ip_interface(cfg["lan"]["address"]).network))
+        lan_net=str(ipaddress.ip_interface(cfg["lan"]["address"]).network), limits=limit_rules(cfg))
     path = _write("nftables.conf", conf, 0o600)
     system.run(["nft", "-f", path], check=True)
 
@@ -92,11 +126,15 @@ def apply_ap(cfg, channel):
     return True
 
 
-def apply_base(cfg):
-    system.run(["rfkill", "unblock", "wlan"])
-    apply_bridge(cfg)
-    apply_dnsmasq(cfg)
-    apply_firewall(cfg)
+def apply_base(cfg, parts=("bridge", "dnsmasq", "firewall")):
+    """Applique les parties demandées, dans l'ordre : le DNS a besoin du pont, le pare-feu des interfaces."""
+    if "bridge" in parts:
+        system.run(["rfkill", "unblock", "wlan"])
+        apply_bridge(cfg)
+    if "dnsmasq" in parts:
+        apply_dnsmasq(cfg)
+    if "firewall" in parts:
+        apply_firewall(cfg)
 
 
 def current_ap():

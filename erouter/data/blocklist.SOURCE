@@ -1,0 +1,5 @@
+Source    : https://github.com/StevenBlack/hosts (licence MIT, voir blocklist.LICENSE)
+Commit    : f5e8defaaf8ea01d8b82178c0fb626eb9f09789d
+Domaines  : 77755
+SHA-256   : 94067724d58588440d4c5a156ef6d78edbd6aa7692dfd895cae4cf3ad56e26ba   (fichier décompressé, une ligne « 0.0.0.0 domaine » par entrée)
+Mise à jour : scripts/update-blocklist.sh f5e8defaaf8ea01d8b82178c0fb626eb9f09789d

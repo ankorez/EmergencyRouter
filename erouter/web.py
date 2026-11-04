@@ -1,4 +1,5 @@
 """Interface web (service sans privilèges). Tout ce qui touche au système passe par l'agent (rpc.py)."""
+import copy
 import functools
 import hashlib
 import json
@@ -10,11 +11,11 @@ import time
 from datetime import timedelta
 from urllib.parse import urlsplit
 
-from flask import Flask, g, jsonify, request, send_from_directory, session
+from flask import Flask, Response, g, jsonify, request, send_from_directory, session
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from . import __version__, config, rpc
+from . import __version__, buildinfo, config, rpc
 
 log = logging.getLogger("erouter.web")
 
@@ -62,17 +63,8 @@ def init_secret(timeout=30):
 
 
 def build_info():
-    """Version du logiciel et de l'image (écrite à la construction) : affichée seulement après connexion."""
-    info = {"version": __version__}
-    try:
-        with open(BUILD_INFO) as f:
-            data = json.load(f)
-        for key in ("version", "commit", "built", "os", "source"):
-            if isinstance(data.get(key), str) and len(data[key]) <= 64:
-                info[key] = data[key]
-    except (OSError, ValueError, AttributeError):
-        pass
-    return info
+    """Version du logiciel et de l'image : affichée seulement après connexion."""
+    return buildinfo.load(BUILD_INFO)
 
 
 def _cfg():
@@ -169,7 +161,7 @@ def index():
 
 @app.get("/static/<path:name>")
 def static_files(name):
-    if name not in ("app.js", "app.css"):
+    if name not in ("app.js", "features.js", "app.css"):
         return err("Introuvable", 404)
     return send_from_directory(STATIC, name)
 
@@ -280,12 +272,21 @@ def wifi_forget():
     return jsonify(ok=True)
 
 
+SETTINGS = {                     # section -> clés que l'interface a le droit de modifier
+    "ap": ("enabled", "ssid", "password", "country", "fallback_channel"),
+    "lan": ("address", "dhcp_start", "dhcp_end", "lease", "dns"),
+    "usage": ("plan_gb", "alert_percent", "reset_day"),
+    "savings": ("block_ads", "limits"),
+    "sqm": ("enabled", "down_mbit", "up_mbit"),
+    "setup": ("done",),
+}
+
+
 @app.get("/api/settings")
 @auth
 def get_settings():
     cfg = _cfg()
-    return jsonify(ap={k: cfg["ap"][k] for k in ("enabled", "ssid", "password", "country", "fallback_channel")},
-                   lan=cfg["lan"])
+    return jsonify({section: {k: cfg[section][k] for k in keys} for section, keys in SETTINGS.items()})
 
 
 @app.post("/api/settings")
@@ -293,14 +294,11 @@ def get_settings():
 def set_settings():
     d = request.get_json()
     cfg = _cfg()
-    if isinstance(d.get("ap"), dict):
-        for k in ("enabled", "ssid", "password", "country", "fallback_channel"):
-            if k in d["ap"]:
-                cfg["ap"][k] = d["ap"][k]
-    if isinstance(d.get("lan"), dict):
-        for k in ("address", "dhcp_start", "dhcp_end", "lease", "dns"):
-            if k in d["lan"]:
-                cfg["lan"][k] = d["lan"][k]
+    for section, keys in SETTINGS.items():
+        if isinstance(d.get(section), dict):
+            for k in keys:
+                if k in d[section]:
+                    cfg[section][k] = d[section][k]
     try:
         _save(cfg)                       # l'agent nettoie et valide : c'est lui qui fait foi
     except RuntimeError as e:
@@ -319,6 +317,93 @@ def set_ssh():
         return jsonify(rpc.call("set_ssh", enabled=bool(d.get("enabled")), password=password))
     except RuntimeError as e:
         return err(e)
+
+
+@app.get("/api/usage")
+@auth
+def get_usage():
+    return jsonify(rpc.call("usage"))
+
+
+@app.post("/api/usage/reset")
+@auth
+def reset_usage():
+    rpc.call("usage_reset")
+    return jsonify(ok=True)
+
+
+@app.get("/api/history")
+@auth
+def get_history():
+    return jsonify(points=rpc.call("history"))
+
+
+@app.get("/api/speedtest")
+@auth
+def speedtest_status():
+    return jsonify(rpc.call("speedtest_status"))
+
+
+@app.post("/api/speedtest")
+@auth
+def speedtest_start():
+    try:
+        return jsonify(rpc.call("speedtest_start"))
+    except RuntimeError as e:
+        return err(e)
+
+
+def _download(body, mimetype, filename):
+    resp = Response(body, mimetype=mimetype)
+    resp.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return resp
+
+
+@app.get("/api/diagnostic")
+@auth
+def diagnostic():
+    return _download(rpc.call("diagnostic"), "text/plain; charset=utf-8", time.strftime("erouter-diagnostic-%Y%m%d-%H%M.txt"))
+
+
+@app.get("/api/backup")
+@auth
+def backup():
+    cfg = copy.deepcopy(_cfg())
+    cfg["web"]["secret"] = ""            # le secret de session ne se sauvegarde pas
+    data = {"erouter_backup": 1, "version": __version__, "created": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "config": config.sanitize(cfg)}
+    return _download(json.dumps(data, indent=2, ensure_ascii=False), "application/json", time.strftime("erouter-config-%Y%m%d.json"))
+
+
+@app.post("/api/restore")
+@auth
+def restore():
+    d = request.get_json()
+    if not isinstance(d, dict) or d.get("erouter_backup") != 1 or not isinstance(d.get("config"), dict):
+        return err("Ce fichier n'est pas une sauvegarde EmergencyRouter")
+    current = _cfg()
+    try:
+        new = config.sanitize(d["config"])
+        new["web"]["secret"] = current["web"]["secret"]
+        new["ssh"] = copy.deepcopy(current["ssh"])   # le mot de passe SSH vit dans le système : il n'est pas restauré
+        _save(new)                                   # l'agent revalide tout
+    except (ValueError, RuntimeError) as e:
+        return err(e)
+    return jsonify(ok=True, relogin=new["web"]["password_hash"] != current["web"]["password_hash"])
+
+
+@app.get("/api/qr.svg")
+@auth
+def qr_code():
+    try:
+        from . import qr
+        cfg = _cfg()
+        svg = qr.svg(qr.wifi_payload(cfg["ap"]["ssid"], cfg["ap"]["password"]))
+    except ImportError:
+        return err("QR code indisponible (paquet python3-qrcode manquant)", 501)
+    resp = Response(svg, mimetype="image/svg+xml")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.get("/api/clients")

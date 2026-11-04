@@ -5,10 +5,12 @@ et ne peut demander que les méthodes de METHODS, dont chacune valide ses param�
 """
 import logging
 import pwd
+import signal
 import subprocess
 import threading
+import time
 
-from . import agent, config, fs, lan, rpc, system
+from . import agent, buildinfo, config, diagnostic, fs, lan, rpc, speedtest, system, wd
 
 log = logging.getLogger("erouter.agentd")
 
@@ -108,13 +110,46 @@ def m_set_ssh(enabled, password=None):
     return {"enabled": ssh["enabled"], "password_set": ssh["password_set"], "user": user}
 
 
+_SPEEDTEST = speedtest.Speedtest()
+
+
+def m_usage():
+    return agent.get_usage().summary(config.load_for_agent()["usage"], time.time())
+
+
+def m_usage_reset():
+    agent.get_usage().reset()
+    return True
+
+
+def m_history():
+    return agent.HISTORY.series(time.time())
+
+
+def m_speedtest_start():
+    if not agent.snapshot()["uplink"]["internet"]:
+        raise ValueError("Pas d'Internet : impossible de tester le débit")
+    _SPEEDTEST.start(_uplink())
+    return _SPEEDTEST.status()
+
+
+def m_speedtest_status():
+    return _SPEEDTEST.status()
+
+
+def m_diagnostic():
+    return diagnostic.collect(config.load_for_agent(), agent.snapshot(), buildinfo.load())
+
+
 def m_reboot():
     subprocess.Popen(["systemctl", "reboot"])
     return True
 
 
 METHODS = {"status": m_status, "scan": m_scan, "connect": m_connect, "forget": m_forget,
-           "clients": m_clients, "save_config": m_save_config, "set_ssh": m_set_ssh, "reboot": m_reboot}
+           "clients": m_clients, "save_config": m_save_config, "set_ssh": m_set_ssh, "reboot": m_reboot,
+           "usage": m_usage, "usage_reset": m_usage_reset, "history": m_history, "speedtest_start": m_speedtest_start,
+           "speedtest_status": m_speedtest_status, "diagnostic": m_diagnostic}
 
 
 def _ensure_secret():
@@ -132,7 +167,16 @@ def main():
     except Exception:
         log.exception("impossible de créer le secret de session")
     rpc.serve(METHODS)
-    agent.run_forever(threading.Event())
+    stop = threading.Event()
+
+    def _stop(*_):
+        stop.set()
+        agent.wake.set()
+    signal.signal(signal.SIGTERM, _stop)
+    signal.signal(signal.SIGINT, _stop)
+    wd.notify("READY=1")
+    agent.run_forever(stop)
+    agent.shutdown()
 
 
 if __name__ == "__main__":

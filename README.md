@@ -12,17 +12,17 @@ Internet ← 5G ← wlan0 ┐
 
 ## Aperçu
 
-Captures réalisées avec des données fictives.
+Captures réalisées avec des données fictives (`python3 tests/ui/screenshots.py`).
 
 ![Tableau de bord, thème sombre](docs/screenshots/dashboard-dark.png)
 
-| Thème clair | Mobile | Premier démarrage |
+| Thème clair | Mobile |
+|---|---|
+| ![Tableau de bord, thème clair](docs/screenshots/dashboard-light.png) | ![Interface sur mobile](docs/screenshots/mobile.png) |
+
+| Assistant de premier démarrage | Outils | Accès SSH |
 |---|---|---|
-| ![Tableau de bord, thème clair](docs/screenshots/dashboard-light.png) | ![Interface sur mobile](docs/screenshots/mobile.png) | ![Écran de premier démarrage](docs/screenshots/login.png) |
-
-Le bouton « SSH » de l'en-tête ouvre une fenêtre pour activer le SSH et choisir son mot de passe :
-
-![Fenêtre d'accès SSH](docs/screenshots/ssh-dialog.png)
+| ![Assistant](docs/screenshots/wizard.png) | ![Outils](docs/screenshots/tools-dialog.png) | ![SSH](docs/screenshots/ssh-dialog.png) |
 
 L'interface suit le thème clair ou sombre de l'appareil et s'adapte aux petits écrans.
 
@@ -69,6 +69,22 @@ ssh pi@192.168.1.1        # depuis le hotspot ERouter-Setup ou le câble Etherne
 Copier ce dossier sur le Pi puis `sudo ./install.sh`. Fais-le **avant** d'en avoir besoin (il télécharge des paquets).
 Sans l'image il n'y a pas de partition de données séparée : la protection de la carte SD n'est pas disponible.
 
+## Fonctions
+
+| Fonction | Où | Ce qu'elle fait | Coût |
+|---|---|---|---|
+| **Consommation de données** | carte « Consommation » | octets reçus/envoyés sur la 5G : aujourd'hui, depuis le renouvellement du forfait, par appareil ; barre de progression et alerte à un seuil | aucune donnée ; une écriture dans `/data` toutes les 10 min |
+| **Qualité de la connexion** | carte « Qualité » | latence, pertes, signal et débit sur 24 h | en mémoire seulement (perdu au redémarrage) |
+| **Test de débit** | carte « Test de débit » | débit descendant/montant, latence, gigue, pertes ; propose d'utiliser les débits pour l'anti-latence | environ **35 Mo** par test, sur demande ; contacte `speed.cloudflare.com` |
+| **Blocage des publicités** | carte « Économies » | bloque ~77 000 domaines publicitaires et de traçage au niveau DNS ([StevenBlack/hosts](https://github.com/StevenBlack/hosts), licence MIT, version épinglée dans `erouter/data/blocklist.SOURCE`) | décompressée en mémoire ; peut gêner quelques sites |
+| **Anti-latence (CAKE)** | carte « Économies » | évite que la connexion devienne très lente quand quelqu'un télécharge (envoi + réception, équité par appareil) | à régler un peu sous les débits réels de la 5G |
+| **Plafond par appareil** | carte « Économies » | limite le débit d'un appareil (suivi par son adresse MAC, même si son IP change) | jusqu'à 16 appareils ; plafond **approximatif** (à ± 30 % près) |
+| **QR code du Wi-Fi** | Outils | connecte un téléphone au hotspot en scannant | — |
+| **Diagnostic** | Outils | un fichier avec l'état, la configuration **sans mot de passe**, le réseau et les journaux, à joindre à une demande d'aide | relis-le : il contient des noms de réseaux, des adresses IP et MAC |
+| **Sauvegarde / restauration** | Outils | exporte et réimporte la configuration (hotspot, forfait, plafonds, mot de passe admin) | le fichier contient le mot de passe du hotspot : garde-le en lieu sûr ; le Wi-Fi 5G et le SSH ne sont pas inclus |
+| **Assistant de premier démarrage** | s'ouvre seul | 3 étapes : hotspot, Wi-Fi de la 5G, terminé | — |
+| **Chien de garde** | automatique | le Pi redémarre seul s'il se fige ; l'agent est relancé s'il ne répond plus | — |
+
 ## Limites à connaître
 
 - **Même puce = même canal.** Le hotspot est calé sur le canal de la connexion 5G ; l'agent le suit automatiquement
@@ -79,7 +95,10 @@ Sans l'image il n'y a pas de partition de données séparée : la protection de 
 - **Ne branche pas le Pi en même temps que la box fibre sur le même réseau** (deux serveurs DHCP, même IP).
 - Les débits d'un Wi-Fi unique partagé entre uplink et hotspot sont réduits ; pour de meilleurs résultats, mets les
   appareils fixes sur Ethernet via le switch.
-- Pas de pile dans le Pi : au démarrage hors-ligne l'heure peut être fausse jusqu'à la synchronisation (sans effet sur le routage).
+- Pas de pile dans le Pi : au démarrage hors-ligne l'heure peut être fausse jusqu'à la synchronisation (sans effet sur le routage ; la consommation est comptée mais « non datée » jusque-là).
+- **Hotspot et uplink sur une seule puce : l'économie d'énergie Wi-Fi doit rester coupée**, sinon la radio s'endort, le hotspot n'émet plus ses balises de façon fiable et les nouveaux appareils ne le voient plus (les appareils déjà connectés restent connectés). L'agent la coupe et le revérifie toutes les 30 s ; NetworkManager est configuré dans le même sens (`91-erouter-wifi.conf`).
+- **Le hotspot est en 2,4 GHz** tant que ton iPhone l'est : une seule radio, donc un seul canal pour les deux. Garde le partage en 2,4 GHz (« Maximiser la compatibilité ») : beaucoup d'objets connectés n'ont pas de 5 GHz.
+- **Pas de swap sur la carte SD** : Raspberry Pi OS crée par défaut un fichier `/var/swap` (écriture différée du swap compressé) qui empêche le verrouillage en lecture seule et use la carte. EmergencyRouter impose un swap compressé en mémoire seulement (`Mechanism=zram`).
 
 ## Architecture
 
@@ -88,7 +107,7 @@ Sans l'image il n'y a pas de partition de données séparée : la protection de 
 | `erouter-data` (`scripts/erouter-data`) | root, au démarrage | vérifie, répare ou recrée la partition de données `/data`, puis la monte |
 | `erouter-agent` (`agent.py`, `agentd.py`, `lan.py`, `tls.py`, `fs.py`) | root | pont `br0`, `ap0`, hostapd, dnsmasq, nftables ; suit le canal de l'uplink ; surveille Internet ; certificat HTTPS ; verrouillage du système ; seul à écrire la config |
 | `erouter-web` (`web.py`, `webd.py`, `static/`) | utilisateur `erouter`, système en lecture seule, seul droit : ports 80/443 | API Flask + interface (sans dépendance externe, fonctionne hors-ligne), servie en HTTPS par gunicorn ; le port 80 redirige vers HTTPS |
-| `rpc.py` | | socket local `/run/erouter/agent.sock` (0660 root:erouter) ; l'agent n'expose que 7 méthodes et valide chaque paramètre |
+| `rpc.py` | | socket local `/run/erouter/agent.sock` (0660 root:erouter) ; l'agent n'expose que 14 méthodes et valide chaque paramètre |
 
 Services supplémentaires : `erouter-hostapd`, `erouter-dnsmasq`. Détails et limites : [SECURITY.md](SECURITY.md).
 
@@ -129,10 +148,13 @@ Si le certificat ne peut pas être créé, l'interface reste servie en HTTP (ave
 ## Développement
 
 ```
-make check          # pyflakes + shellcheck + 51 tests unitaires
+make check          # pyflakes + shellcheck + tests unitaires (122)
+make ui-test        # l'interface jouée dans un vrai Chrome sans écran (6 scénarios : tableau de bord, outils, assistant, test de débit, économies, mobile)
 make integration    # vérifications dans un vrai Debian 13 (Docker, conteneur privilégié) :
                     # vrais disques pour la partition de données (saine, corrompue, détruite), post-traitement d'image,
-                    # HTTPS de bout en bout avec gunicorn, pare-feu (nft -c), dnsmasq, unités systemd, shellcheck
+                    # HTTPS de bout en bout avec gunicorn, pare-feu avec du vrai trafic (compteurs, plafonds mesurés, usurpation),
+                    # CAKE sur une vraie interface, test de débit contre un serveur local, blocage des pubs avec un vrai dnsmasq,
+                    # QR code relu par un lecteur, diagnostic sans secret, unités systemd, shellcheck
 make image          # image flashable
 ```
 La CI GitHub exécute les vérifications statiques et les tests unitaires. Ce qui n'est pas testé automatiquement :
@@ -141,4 +163,5 @@ le hotspot et l'uplink Wi-Fi (matériel), le démarrage réel de l'image et le v
 ## Feuille de route
 
 - [ ] Image construite automatiquement par GitHub Actions
-- [ ] Compteur de données 5G
+- [ ] IPv6
+- [ ] Mise à jour de l'application sans reflasher

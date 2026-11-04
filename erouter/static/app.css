@@ -71,3 +71,37 @@ dialog h3{margin:0 0 14px}
 #login .card{width:min(380px,100%)}
 [hidden]{display:none!important}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* --- fonctions : consommation, graphiques, test de débit, économies, outils, assistant */
+.cols{display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr))}
+.cols3{display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));margin-bottom:12px}
+.stats{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:12px}
+.right{margin-left:auto;text-align:right}
+progress{width:100%;height:10px;margin:4px 0 8px;border:0;border-radius:99px;overflow:hidden;background:var(--line);accent-color:var(--accent)}
+progress::-webkit-progress-bar{background:var(--line)}
+progress::-webkit-progress-value{background:var(--accent)}
+progress::-moz-progress-bar{background:var(--accent)}
+progress.warn::-webkit-progress-value{background:var(--warn)}progress.warn::-moz-progress-bar{background:var(--warn)}
+progress.bad::-webkit-progress-value{background:var(--bad)}progress.bad::-moz-progress-bar{background:var(--bad)}
+fieldset{border:0;margin:0;padding:0;min-width:0}
+legend{padding:0;margin-bottom:8px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
+select{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+.chart-block{margin-bottom:10px}
+.chart{display:block;width:100%;height:60px;background:var(--bg);border-radius:8px}
+.chart .line{fill:none;stroke:var(--accent);stroke-width:1.6;vector-effect:non-scaling-stroke;stroke-linejoin:round}
+.chart .line2{fill:none;stroke:var(--ok);stroke-width:1.6;vector-effect:non-scaling-stroke;stroke-linejoin:round}
+.chart .loss{fill:var(--bad);opacity:.5}
+.chart .grid{stroke:var(--line);stroke-width:1;vector-effect:non-scaling-stroke}
+.stack{display:grid;gap:8px;margin-bottom:12px}
+a.btn,label.btn{display:block;text-align:center;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:8px 14px;cursor:pointer;color:inherit;text-decoration:none;margin:0;font-size:15px}
+a.btn:hover,label.btn:hover{border-color:var(--accent)}
+.step{display:flex;gap:6px;margin-bottom:12px}
+.step i{flex:1;height:4px;border-radius:2px;background:var(--line)}
+.step i.on{background:var(--accent)}
+#qrImg{display:block;margin:0 auto 12px;background:#fff;border-radius:12px;padding:8px}
+dialog form,dialog .stack{max-width:100%}
+#wizDlg,#toolsDlg{width:min(460px,92vw)}
+.item .tag.cap{margin-left:auto}
+.row.wrap{flex-wrap:wrap}
+.row.wrap>label{min-width:120px}
+#limAdd{margin-top:4px}

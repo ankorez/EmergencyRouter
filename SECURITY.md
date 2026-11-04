@@ -16,15 +16,19 @@ Il ne protège pas contre un attaquant qui a un accès physique au Pi (carte SD,
 |---|---|
 | Pare-feu | nftables, politique « drop » : rien n'est joignable depuis l'uplink (5G) ; depuis le LAN seulement DHCP, DNS, mDNS, web et SSH (SSH limité en débit) ; anti-usurpation d'adresse source |
 | Privilèges | l'interface web tourne sous un utilisateur dédié, sans droits (seul le port 80 est autorisé), avec un système de fichiers en lecture seule et un filtre d'appels système |
-| Agent root | n'écoute que sur un socket Unix (0660 `root:erouter`), expose 7 méthodes, valide chaque paramètre ; aucune commande n'est lancée via un shell |
+| Agent root | n'écoute que sur un socket Unix (0660 `root:erouter`), expose 14 méthodes, valide chaque paramètre ; aucune commande n'est lancée via un shell |
 | Configuration | le web ne peut pas écrire le fichier : il demande à l'agent, qui nettoie, valide (anti-injection dans dnsmasq/hostapd) et écrit ; la config est revalidée à chaque lecture |
 | HTTPS | certificat auto-signé EC P-256 créé par l'agent, clé privée `640 root:erouter`, TLS 1.2 minimum, redirection du port 80, cookie de session `__Host-` + `Secure` ; l'empreinte du certificat est affichée dans l'interface |
 | Web | en-têtes CSP stricte (aucun script ni style en ligne), `X-Frame-Options`, `nosniff`, sessions `SameSite=Strict`, contrôle du `Host` (anti DNS-rebinding) et de l'`Origin` (anti CSRF), 5 essais de connexion par minute, hash de mot de passe scrypt, sessions invalidées au changement de mot de passe, taille des requêtes limitée, aucune version de serveur annoncée |
 | SSH | **éteint par défaut**, activable depuis l'interface avec un mot de passe choisi par l'utilisateur (12 caractères minimum, mots de passe prévisibles refusés, transmis à `chpasswd` par l'entrée standard) ; uniquement depuis le réseau du routeur, limité en débit ; `root` et les comptes système jamais modifiables, 3 essais, pas de redirection de ports ni d'agent |
+| Données et sauvegardes | la sauvegarde exportée contient le mot de passe du hotspot et l'empreinte du mot de passe admin (jamais le secret de session, ni le Wi-Fi de la 5G, ni le SSH) ; la restauration est entièrement revalidée par l'agent. Le diagnostic masque tout secret connu et toute ligne qui évoque un mot de passe |
 | Carte SD | système en lecture seule une fois démarré, données sur une partition séparée vérifiée/réparée/recréée à chaque démarrage (voir README), journaux en RAM |
 | Chaîne d'approvisionnement | uniquement des paquets Debian signés (aucun `pip`) ; `pi-gen` épinglé sur un commit précis ; actions GitHub épinglées par empreinte ; image publiée avec son SHA-256 |
 
 ## Limites connues
+
+- **Test de débit** : contacte `speed.cloudflare.com` (adresse IP du Pi vue par ce service), uniquement quand tu le lances, et consomme ~35 Mo.
+- **Liste de blocage** : données tierces (StevenBlack/hosts) épinglées à un commit ; elles ne sont mises à jour qu'à la reconstruction de l'image (`scripts/update-blocklist.sh`).
 
 - **Certificat auto-signé.** Le navigateur avertit à la première visite : compare l'empreinte SHA-256 affichée en bas de l'interface avec celle du certificat présenté. Sans cette vérification, un appareil malveillant déjà présent sur le LAN pourrait se faire passer pour le routeur à ce moment-là (risque de « première confiance »).
 - **Partition de données.** Elle contient la config et le certificat en clair, sans chiffrement (mêmes droits que la config : `root` et le groupe `erouter`). Quiconque a la carte physiquement y a accès.

@@ -11,8 +11,10 @@ Sortie de secours : ajouter `erouter.unlock` à la fin de cmdline.txt (partition
 Ligne de commande :  sudo erouter-fs status | lock | unlock
 """
 import contextlib
+import glob
 import logging
 import os
+import stat
 import sys
 import threading
 import time
@@ -26,6 +28,9 @@ DISABLED = os.path.join(DATA, "erouter", "lock-disabled")     # présent => verr
 DATA_STATE = os.environ.get("EROUTER_DATA_STATE", "/run/erouter-data.state")
 _lock = threading.RLock()
 _last_try = 0.0
+RETRY_MIN, RETRY_MAX = 30, 600      # s entre deux tentatives de verrouillage : double à chaque échec
+_retry = RETRY_MIN
+_last_blockers_log = 0.0
 
 
 def root_ro():
@@ -102,13 +107,59 @@ def writable():
                 log.warning("Reverrouillage impossible pour l'instant : nouvel essai automatique")
 
 
+def _loop_backings():
+    """Fichiers servant de support à un périphérique « loop » (ex. le fichier d'écriture différée du swap)."""
+    out = []
+    for path in glob.glob("/sys/block/loop*/loop/backing_file"):
+        try:
+            with open(path) as f:
+                out.append(f.read().strip())
+        except OSError:
+            pass
+    return out
+
+
+def blockers(root_dev=None, limit=8):
+    """Ce qui empêche de repasser `/` en lecture seule : (processus, fichier) ouverts en écriture sur la racine,
+    et fichiers de la racine utilisés comme support d'un périphérique loop. Doit s'exécuter en root pour tout voir."""
+    try:
+        root_dev = os.stat("/").st_dev if root_dev is None else root_dev
+    except OSError:
+        return []
+    found = []
+    for backing in _loop_backings():
+        try:
+            if os.stat(backing).st_dev == root_dev:
+                found.append(("périphérique loop", backing))
+        except OSError:
+            pass
+    for pid in (d for d in os.listdir("/proc") if d.isdigit()) if os.path.isdir("/proc/self/fd") else ():
+        try:
+            for fd in os.listdir(f"/proc/{pid}/fd"):
+                st = os.stat(f"/proc/{pid}/fd/{fd}")
+                if st.st_dev != root_dev or not stat.S_ISREG(st.st_mode):
+                    continue
+                with open(f"/proc/{pid}/fdinfo/{fd}") as f:
+                    flags = int(next(line for line in f if line.startswith("flags:")).split()[1], 8)
+                if flags & (os.O_WRONLY | os.O_RDWR):
+                    with open(f"/proc/{pid}/comm") as f:
+                        found.append((f.read().strip(), os.readlink(f"/proc/{pid}/fd/{fd}")))
+        except (OSError, StopIteration, ValueError):
+            continue            # le processus a disparu ou n'est pas lisible
+    return list(dict.fromkeys(found))[:limit]
+
+
+def describe_blockers(items):
+    return "; ".join(f"{who} : {path}" for who, path in items) or "cause introuvable (processus non visibles ?)"
+
+
 def maintain():
     """Appelée régulièrement par l'agent : verrouille la racine une fois le démarrage terminé."""
-    global _last_try
+    global _last_try, _retry, _last_blockers_log
     if not enabled() or rescue() or root_ro():
         return
     with _lock:
-        if time.time() - _last_try < 30:
+        if time.time() - _last_try < _retry:
             return
         _last_try = time.time()
         state = system.run(["systemctl", "is-system-running"]).stdout.strip()
@@ -116,8 +167,12 @@ def maintain():
             return
         if _try_lock(2):
             log.info("Système verrouillé (lecture seule)")
+            _retry = RETRY_MIN
         else:
-            log.warning("Verrouillage impossible pour l'instant (fichier ouvert en écriture)")
+            _retry = min(_retry * 2, RETRY_MAX)
+            if time.time() - _last_blockers_log > 600:       # on dit QUI bloque, mais pas toutes les 30 secondes
+                _last_blockers_log = time.time()
+                log.warning("Verrouillage impossible, prochain essai dans %d s. Bloqué par : %s", _retry, describe_blockers(blockers()))
 
 
 def set_enabled(on):

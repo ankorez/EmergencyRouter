@@ -35,6 +35,7 @@ async function boot() {
     return;
   }
   await Promise.allSettled([refresh(), loadSettings(), loadNetworks(false)]);
+  document.dispatchEvent(new CustomEvent("erouter:ready"));
   timers.push(setInterval(refresh, 5000), setInterval(() => loadNetworks(false), 15000));
 }
 

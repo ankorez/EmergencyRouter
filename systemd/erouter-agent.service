@@ -4,7 +4,10 @@ After=erouter-data.service NetworkManager.service
 Wants=erouter-data.service NetworkManager.service
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+WatchdogSec=180
+TimeoutStartSec=120
 WorkingDirectory=/opt/erouter
 Environment=PYTHONPATH=/opt/erouter
 ExecStart=/usr/bin/python3 -s -B -m erouter.agentd

@@ -10,7 +10,7 @@ FAIL=0
 ok()  { echo "  ✔ $*"; }
 bad() { echo "  ✘ $*"; FAIL=$((FAIL + 1)); }
 
-cleanup() { ip netns del lan 2>/dev/null; ip netns del net 2>/dev/null; ip link del br0 2>/dev/null; ip link del wlan0 2>/dev/null; pkill -f "listen.py" 2>/dev/null; true; }
+cleanup() { ip netns del lan 2>/dev/null; ip netns del net 2>/dev/null; ip link del br0 2>/dev/null; ip link del wlan0 2>/dev/null; pkill -f "listen.py" 2>/dev/null; pkill -f "serve_bytes.py" 2>/dev/null; true; }
 trap cleanup EXIT
 cleanup
 
@@ -62,10 +62,10 @@ for port in map(int, sys.argv[2:]):
 threading.Event().wait()
 PY
 rm -f /tmp/src_*
-python3 /tmp/listen.py 4 22 443 80 8080 5000 &
-python3 /tmp/listen.py 6 22 443 &
-ip netns exec lan python3 /tmp/listen.py 4 22 &       # un appareil du LAN avec un SSH ouvert
-ip netns exec net python3 /tmp/listen.py 4 5000 &     # un serveur « sur Internet »
+python3 /tmp/listen.py 4 22 443 80 8080 5000 >/dev/null 2>&1 &
+python3 /tmp/listen.py 6 22 443 >/dev/null 2>&1 &
+ip netns exec lan python3 /tmp/listen.py 4 22 >/dev/null 2>&1 &       # un appareil du LAN avec un SSH ouvert
+ip netns exec net python3 /tmp/listen.py 4 5000 >/dev/null 2>&1 &     # un serveur « sur Internet »
 sleep 1
 
 can_connect() {   # can_connect <espace de noms> <adresse> <port>
@@ -115,5 +115,82 @@ nft flush ruleset; nft -f /tmp/fw-sans-antispoof.nft
 spoof && ok "contrôle : SANS la règle anti-usurpation, la fausse adresse passe (le test est donc significatif)" || bad "contrôle négatif : le test ne détecte rien"
 nft flush ruleset; nft -f /tmp/fw.nft
 spoof && bad "un client a pu sortir avec une fausse adresse source" || ok "adresse source usurpée refusée par le pare-feu"
+
+echo "  -- compteurs de consommation par appareil (lus par l'agent)"
+counter() { PYTHONPATH="$SRC" python3 -B -c "import sys; from erouter import usage; print(usage.read_counters(sys.argv[1]).get(sys.argv[2], 0))" "$1" "$2"; }
+nft flush ruleset; nft -f /tmp/fw.nft
+ip netns exec lan ping -c 5 -s 1000 -W 1 10.2.0.9 >/dev/null 2>&1
+up=$(counter usage_up 10.1.0.50); down=$(counter usage_down 10.1.0.50)
+[ "$up" -ge 5000 ] && ok "octets envoyés par 10.1.0.50 comptés ($up o)" || bad "octets envoyés non comptés ($up)"
+[ "$down" -ge 5000 ] && ok "octets reçus par 10.1.0.50 comptés ($down o)" || bad "octets reçus non comptés ($down)"
+for p in 22 80 443 5000; do can_connect net 10.1.0.50 "$p"; done
+sleep 0.3
+[ "$(counter usage_down 10.1.0.50)" -eq "$down" ] && ok "le trafic entrant refusé n'est pas compté" || bad "du trafic refusé a été compté"
+spoof >/dev/null 2>&1
+[ "$(counter usage_up 192.168.77.7)" -eq 0 ] && ok "une adresse usurpée n'est jamais comptée" || bad "adresse usurpée comptée"
+
+echo "  -- plafond de débit par appareil (mesuré)"
+cat > /tmp/serve_bytes.py <<'PY'
+import socket, sys, threading
+size, mode, port = int(sys.argv[1]), sys.argv[2], int(sys.argv[3])      # mode : send (envoie size octets) ou sink (lit tout)
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(("0.0.0.0", port)); s.listen(8)
+def handle(c):
+    try:
+        if mode == "send":
+            c.sendall(b"\0" * size)
+        else:
+            while c.recv(65536): pass
+    finally:
+        c.close()
+while True:
+    c, _ = s.accept(); threading.Thread(target=handle, args=(c,), daemon=True).start()
+PY
+cat > /tmp/transfer.py <<'PY'
+import socket, sys, time
+host, port, mode, size = sys.argv[1], int(sys.argv[2]), sys.argv[3], int(sys.argv[4])
+s = socket.socket(); s.settimeout(90); s.connect((host, port)); t = time.monotonic()
+if mode == "pull":
+    got = 0
+    while got < size:
+        b = s.recv(65536)
+        if not b: break
+        got += len(b)
+else:
+    s.sendall(b"\0" * size); s.shutdown(socket.SHUT_WR)
+    try: s.recv(1)
+    except Exception: pass
+print(round(time.monotonic() - t, 2))
+PY
+ip netns exec net python3 /tmp/serve_bytes.py 4000000 send 5001 >/dev/null 2>&1 &
+ip netns exec net python3 /tmp/serve_bytes.py 4000000 sink 5002 >/dev/null 2>&1 &
+sleep 1
+render_limits() {   # render_limits <ko/s montant> <ko/s descendant>
+  python3 -B - "$SRC" "$1" "$2" <<'PY'
+import sys
+from jinja2 import Environment, FileSystemLoader
+e = Environment(loader=FileSystemLoader(sys.argv[1] + "/erouter/templates"))
+open("/tmp/fw-limits.nft", "w").write(e.get_template("nftables.conf.j2").render(
+    bridge="br0", uplink="wlan0", web_ports=[443, 80], lan_net="10.1.0.0/24",
+    limits=[{"mac": "aa:bb:cc:dd:ee:01", "ip": "10.1.0.50", "up_kbytes": int(sys.argv[2]), "down_kbytes": int(sys.argv[3])}]))
+PY
+  nft flush ruleset; nft -f /tmp/fw-limits.nft
+}
+nft flush ruleset; nft -f /tmp/fw.nft
+free_dl=$(ip netns exec lan python3 /tmp/transfer.py 10.2.0.9 5001 pull 4000000)
+free_ul=$(ip netns exec lan python3 /tmp/transfer.py 10.2.0.9 5002 push 4000000)
+render_limits 0 1000
+limited_dl=$(ip netns exec lan python3 /tmp/transfer.py 10.2.0.9 5001 pull 4000000)
+render_limits 1000 0
+limited_ul=$(ip netns exec lan python3 /tmp/transfer.py 10.2.0.9 5002 push 4000000)
+rate() { awk -v e="$1" 'BEGIN { if (e < 0.01) e = 0.01; printf "%d", 4000000 / e / 1000 }'; }      # ko/s
+# Mesure sur un gros transfert (le démarrage de TCP fausse les petits). `nft limit` est un « policer » approximatif : sur ces gros
+# paquets de test il dépasse la consigne d'environ 30 % (1 « ko » nft = 1024 o, plus la rafale initiale). On vérifie donc
+# l'ordre de grandeur : proche de la consigne, et très en dessous du débit sans plafond.
+near_limit() { awk -v r="$1" 'BEGIN { exit !(r >= 500 && r <= 1800) }'; }
+near_limit "$(rate "$limited_dl")" && ok "réception plafonnée à 1000 ko/s : débit réel $(rate "$limited_dl") ko/s (sans plafond : $(rate "$free_dl") ko/s)" || bad "plafond de réception : $(rate "$limited_dl") ko/s au lieu de ~1000"
+near_limit "$(rate "$limited_ul")" && ok "envoi plafonné à 1000 ko/s : débit réel $(rate "$limited_ul") ko/s (sans plafond : $(rate "$free_ul") ko/s)" || bad "plafond d'envoi : $(rate "$limited_ul") ko/s au lieu de ~1000"
+render_limits 0 0
+other=$(ip netns exec lan python3 /tmp/transfer.py 10.2.0.9 5001 pull 4000000)
+[ "$(rate "$other")" -gt 10000 ] && ok "sans plafond, le même appareil retrouve son plein débit ($(rate "$other") ko/s)" || bad "le plafond persiste ($(rate "$other") ko/s)"
 
 exit "$FAIL"

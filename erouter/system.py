@@ -58,6 +58,17 @@ def wifi_link(iface):
     return out
 
 
+def power_save(iface):
+    """True/False selon l'économie d'énergie Wi-Fi de l'interface (« Power save: on/off »), None si inconnu."""
+    p = run(["iw", "dev", iface, "get", "power_save"])
+    m = re.search(r"Power save:\s*(on|off)", p.stdout)
+    return None if p.returncode != 0 or not m else m.group(1) == "on"
+
+
+def set_power_save(iface, on):
+    return run(["iw", "dev", iface, "set", "power_save", "on" if on else "off"]).returncode == 0
+
+
 def iface_ip(iface):
     p = run(["ip", "-j", "-4", "addr", "show", "dev", iface])
     try:
@@ -69,8 +80,30 @@ def iface_ip(iface):
     return ""
 
 
+def ping_ms(iface, host="1.1.1.1"):
+    """Latence (ms) d'un ping via l'interface, ou None s'il n'y a pas de réponse."""
+    p = run(["ping", "-c", "1", "-W", "2", "-I", iface, host], timeout=5)
+    if p.returncode != 0:
+        return None
+    m = re.search(r"time[=<]([0-9.]+)\s*ms", p.stdout)
+    return float(m.group(1)) if m else 0.0
+
+
 def ping(iface, host="1.1.1.1"):
-    return run(["ping", "-c", "1", "-W", "2", "-I", iface, host], timeout=5).returncode == 0
+    return ping_ms(iface, host) is not None
+
+
+def iface_bytes(iface):
+    """(octets reçus, octets émis) cumulés de l'interface, ou (None, None)."""
+    try:
+        base = f"/sys/class/net/{iface}/statistics/"
+        with open(base + "rx_bytes") as f:
+            rx = int(f.read())
+        with open(base + "tx_bytes") as f:
+            tx = int(f.read())
+        return rx, tx
+    except (OSError, ValueError):
+        return None, None
 
 
 def _split_nmcli(line):

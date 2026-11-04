@@ -2,6 +2,20 @@ table inet erouter
 delete table inet erouter
 
 table inet erouter {
+    # Octets par appareil du LAN (lus par l'agent pour la consommation) : ajoutés au fil du trafic
+    set usage_up {
+        type ipv4_addr
+        size 2048
+        flags dynamic
+        counter
+    }
+    set usage_down {
+        type ipv4_addr
+        size 2048
+        flags dynamic
+        counter
+    }
+
     chain input {
         type filter hook input priority 0; policy drop;
         iifname "lo" accept
@@ -15,10 +29,22 @@ table inet erouter {
     }
     chain forward {
         type filter hook forward priority 0; policy drop;
-        ct state established,related accept
         ct state invalid drop
         # anti-usurpation : un client du LAN ne peut émettre qu'avec une adresse de son réseau
         iifname "{{ bridge }}" ip saddr != {{ lan_net }} drop
+{% for l in limits %}
+        # plafond de débit pour {{ l.mac }}
+{% if l.up_kbytes %}
+        iifname "{{ bridge }}" oifname "{{ uplink }}" ip saddr {{ l.ip }} limit rate over {{ l.up_kbytes }} kbytes/second burst 64 kbytes drop
+{% endif %}
+{% if l.down_kbytes %}
+        iifname "{{ uplink }}" oifname "{{ bridge }}" ct state established,related ip daddr {{ l.ip }} limit rate over {{ l.down_kbytes }} kbytes/second burst 64 kbytes drop
+{% endif %}
+{% endfor %}
+        # comptage (après les plafonds : ce qui est jeté n'est pas compté ; les connexions entrantes non sollicitées non plus)
+        iifname "{{ bridge }}" oifname "{{ uplink }}" add @usage_up { ip saddr counter }
+        iifname "{{ uplink }}" oifname "{{ bridge }}" ct state established,related add @usage_down { ip daddr counter }
+        ct state established,related accept
         iifname "{{ bridge }}" oifname "{{ uplink }}" accept
         iifname "{{ bridge }}" oifname "{{ bridge }}" accept
     }

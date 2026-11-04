@@ -4,7 +4,7 @@ import logging
 import threading
 import time
 
-from . import config, fs, lan, system, tls
+from . import config, fs, history, lan, sqm, system, tls, usage, wd
 
 log = logging.getLogger("erouter.agent")
 
@@ -27,12 +27,22 @@ RECONNECT_COOLDOWN = 300
 _pending = None                # (canal candidat, nb de lectures consécutives)
 _offline_since = None
 _last_reconnect = 0.0
-_applied_base = None           # (lan, uplink, port web) réellement appliqué
+_applied_base = {}             # partie -> valeur appliquée ("bridge", "dnsmasq", "firewall")
 _base_failed_at = 0.0
 BASE_RETRY = 30                # s entre deux essais si l'application de la config échoue
 _tls_failed_at = 0.0
 _ssh_failed_at = 0.0
 SSH_RETRY = 30                 # s entre deux tentatives de démarrage de sshd
+
+HISTORY = history.History()
+_usage = None
+_last_sample = 0.0             # (horloge monotone) dernier échantillon d'historique et de comptage par appareil
+_prev_bytes = None             # (horloge monotone, reçus, émis) pour calculer les débits
+POWER_SAVE_EVERY = 30          # s entre deux vérifications de l'économie d'énergie Wi-Fi
+_last_ps_check = 0.0
+_sqm_applied = None            # None : jamais vu ; () : retiré ; sinon (activé, descendant, montant, interface)
+_sqm_failed_at = 0.0
+_sqm_error = ""
 
 
 def snapshot():
@@ -45,18 +55,90 @@ def request_apply():
 
 
 def _apply_base_if_changed(cfg):
-    """Pont, DHCP/DNS et pare-feu : uniquement si leur config a changé (évite de couper les clients)."""
-    global _applied_base, _base_failed_at
-    key = (copy.deepcopy(cfg["lan"]), cfg["uplink"]["interface"], lan.web_ports(cfg))
-    if key == _applied_base or time.monotonic() - _base_failed_at < BASE_RETRY:
+    """Pont, DHCP/DNS et pare-feu : chaque partie n'est réappliquée que si SA config a changé (évite de couper les clients).
+    Un nouveau bail DHCP d'un appareil plafonné ne met à jour que le pare-feu."""
+    global _base_failed_at
+    lan_cfg = copy.deepcopy(cfg["lan"])
+    wanted = {
+        "bridge": (lan_cfg, cfg["uplink"]["interface"]),
+        "dnsmasq": (lan_cfg, bool(cfg["savings"]["block_ads"])),
+        "firewall": (lan_cfg, cfg["uplink"]["interface"], lan.web_ports(cfg), lan.limit_rules(cfg)),
+    }
+    todo = [part for part in ("bridge", "dnsmasq", "firewall") if _applied_base.get(part) != wanted[part]]
+    if not todo or time.monotonic() - _base_failed_at < BASE_RETRY:
         return
     try:
-        lan.apply_base(cfg)
+        lan.apply_base(cfg, todo)
     except Exception:
         _base_failed_at = time.monotonic()    # pas de boucle d'erreurs toutes les 5 s
         log.exception("application de la config réseau impossible, nouvel essai dans %ds", BASE_RETRY)
         return
-    _applied_base = key
+    _applied_base.update({part: wanted[part] for part in todo})
+
+
+def _sync_power_save(up_if):
+    """Le hotspot et la connexion à l'iPhone partagent UNE puce : avec l'économie d'énergie, la radio s'endort et le
+    hotspot n'émet plus ses balises de façon fiable. Les appareils déjà connectés restent connectés, mais les nouveaux
+    (iPad, Android…) ne le voient plus. On la coupe, et on le revérifie car NetworkManager peut la remettre."""
+    global _last_ps_check
+    if time.monotonic() - _last_ps_check < POWER_SAVE_EVERY:
+        return
+    _last_ps_check = time.monotonic()
+    for iface in (up_if, lan.AP_IF):
+        if system.iface_exists(iface) and system.power_save(iface):
+            if system.set_power_save(iface, False):
+                log.info("économie d'énergie Wi-Fi désactivée sur %s", iface)
+            else:
+                log.warning("impossible de désactiver l'économie d'énergie Wi-Fi sur %s", iface)
+
+
+def get_usage():
+    global _usage
+    if _usage is None:
+        _usage = usage.Usage()
+    return _usage
+
+
+def _record(link, up_if, ms):
+    """Consommation (compteurs de l'interface et par appareil) et historique de la qualité de la connexion."""
+    global _last_sample, _prev_bytes
+    now, mono = time.time(), time.monotonic()
+    u = get_usage()
+    rx, tx = system.iface_bytes(up_if)
+    if rx is not None:
+        u.sample_iface(rx, tx, now)
+    if mono - _last_sample >= history.SAMPLE_EVERY:
+        who = {c["ip"]: (c["mac"], c["hostname"]) for c in system.clients(lan.LEASES)}
+        u.sample_devices(usage.read_counters("usage_up"), usage.read_counters("usage_down"), who, now)
+        down = up = None
+        if rx is not None:
+            if _prev_bytes and mono > _prev_bytes[0] and rx >= _prev_bytes[1] and tx >= _prev_bytes[2]:
+                dt = mono - _prev_bytes[0]
+                down, up = (rx - _prev_bytes[1]) / dt, (tx - _prev_bytes[2]) / dt
+            _prev_bytes = (mono, rx, tx)
+        HISTORY.record(now, link["signal"] if link["connected"] else None, ms, down, up)
+        _last_sample = mono
+    u.maybe_save()
+
+
+def _sync_sqm(cfg, up_if):
+    """Anti-latence : appliquée quand elle est activée, retirée sinon, revérifiée régulièrement (le noyau peut l'oublier)."""
+    global _sqm_applied, _sqm_failed_at, _sqm_error
+    if not system.iface_exists(up_if) or time.monotonic() - _sqm_failed_at < 60:
+        return
+    sq = cfg["sqm"]
+    want = (bool(sq["enabled"]), int(sq["down_mbit"]), int(sq["up_mbit"]), up_if)
+    if want[0]:
+        if _sqm_applied != want or not sqm.active(up_if):
+            ok, message = sqm.apply(up_if, want[1], want[2])
+            if ok:
+                _sqm_applied, _sqm_error = want, ""
+            else:
+                _sqm_failed_at, _sqm_error = time.monotonic(), message
+                log.error("anti-latence impossible : %s", message)
+    elif _sqm_applied != ():
+        sqm.clear(up_if)
+        _sqm_applied, _sqm_error = (), ""
 
 
 def _maintain_tls(cfg):
@@ -129,17 +211,22 @@ def _watchdog(up_if, link, internet):
 
 
 def _tick():
+    wd.notify("WATCHDOG=1")
     cfg = config.load_for_agent()
     up_if = cfg["uplink"]["interface"]
     _maintain_tls(cfg)
     _apply_base_if_changed(cfg)
 
     link = system.wifi_link(up_if)
-    internet = link["connected"] and system.ping(up_if)
+    ms = system.ping_ms(up_if) if link["connected"] else None
+    internet = ms is not None
     _watchdog(up_if, link, internet)
+    _record(link, up_if, ms)
+    _sync_sqm(cfg, up_if)
 
     desired = _desired_channel(cfg, link)
     _sync_ap(cfg, desired)
+    _sync_power_save(up_if)
 
     ap_active = system.hostapd_active()
     warnings = []
@@ -150,6 +237,14 @@ def _tick():
     if link["connected"] and system.is_dfs(link["freq"]):
         warnings.append("L'uplink est sur un canal DFS : le hotspot risque de ne pas démarrer.")
 
+    if _sqm_error and cfg["sqm"]["enabled"]:
+        warnings.append(f"Anti-latence indisponible : {_sqm_error}")
+    summary = get_usage().summary(cfg["usage"], time.time())
+    if summary["percent"] is not None:
+        if summary["percent"] >= 100:
+            warnings.append(f"Forfait dépassé : {summary['percent']} % de {cfg['usage']['plan_gb']} Go consommés depuis le {summary['period']['start']}.")
+        elif summary["percent"] >= cfg["usage"]["alert_percent"]:
+            warnings.append(f"Forfait : {summary['percent']} % de {cfg['usage']['plan_gb']} Go consommés depuis le {summary['period']['start']}.")
     ssh_active = _sync_ssh(cfg)
     if cfg["ssh"]["enabled"] and not ssh_active:
         warnings.append("Le SSH est activé mais le serveur n'a pas pu démarrer.")
@@ -176,12 +271,18 @@ def _tick():
                         "password_set": bool(cfg["ssh"]["password_set"])}
 
 
+def shutdown():
+    """À l'arrêt propre : enregistre le comptage en cours."""
+    get_usage().maybe_save(force=True)
+
+
 def run_forever(stop):
     while not stop.is_set():
         try:
             _tick()
         except Exception:
             log.exception("erreur dans la boucle de l'agent")
+        wd.notify("WATCHDOG=1")
         try:
             fs.maintain()
         except Exception:

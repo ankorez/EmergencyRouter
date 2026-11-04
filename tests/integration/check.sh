@@ -14,7 +14,8 @@ section "Installation des outils"
 apt-get update -qq >/dev/null 2>&1
 apt-get install -y -qq --no-install-recommends python3 python3-flask python3-yaml python3-jinja2 python3-gunicorn \
   openssl nftables dnsmasq-base hostapd systemd shellcheck ca-certificates curl e2fsprogs fdisk mtools dosfstools \
-  mount util-linux xz-utils python3-pyflakes procps iproute2 openssh-client openssh-server >/dev/null 2>&1 || { echo "apt a échoué"; exit 1; }
+  mount util-linux xz-utils python3-pyflakes procps iproute2 openssh-client openssh-server \
+  python3-qrcode librsvg2-bin zbar-tools bind9-dnsutils iputils-ping >/dev/null 2>&1 || { echo "apt a échoué"; exit 1; }
 python3 -c "from importlib.metadata import version as v; print('python', __import__('sys').version.split()[0], '| flask', v('flask'), '| gunicorn', v('gunicorn'), '|', end=' ')"
 openssl version
 id erouter >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin erouter
@@ -218,6 +219,129 @@ echo "$out" | grep -v "^KO" | sed 's/^OK  /  ✔ /'
 echo "$out" | grep "^KO" | sed 's/^KO  /  ✘ /'
 [ "$rc" -eq 0 ] || FAIL=$((FAIL + 1))
 unset EROUTER_DATA EROUTER_CONFIG
+
+section "Anti-latence (CAKE) sur une vraie interface"
+ip link add dummy0 type dummy 2>/dev/null; ip link set dummy0 up
+res=$(PYTHONPATH=/work python3 -B -c "from erouter import sqm; print(sqm.apply('dummy0', 80, 20))")
+[ "$res" = "(True, '')" ] && ok "sqm.apply réussit (noyau avec CAKE et IFB)" || bad "sqm.apply : $res"
+tc qdisc show dev dummy0 | grep -q "cake.*bandwidth 20Mbit.*dual-srchost" && ok "envoi : CAKE 20 Mbit/s, équité par appareil" || bad "file d'envoi : $(tc qdisc show dev dummy0 | head -1)"
+tc qdisc show dev ifb4dummy0 | grep -q "cake.*bandwidth 80Mbit.*dual-dsthost.*ingress" && ok "réception : CAKE 80 Mbit/s via IFB" || bad "file de réception : $(tc qdisc show dev ifb4dummy0 | head -1)"
+tc filter show dev dummy0 parent ffff: 2>/dev/null | grep -q mirred && ok "le trafic entrant est bien redirigé vers l'IFB" || bad "pas de redirection vers l'IFB"
+PYTHONPATH=/work python3 -B -c "from erouter import sqm; raise SystemExit(0 if sqm.active('dummy0') else 1)" && ok "sqm.active détecte la file d'attente" || bad "sqm.active"
+PYTHONPATH=/work python3 -B -c "from erouter import sqm; sqm.apply('dummy0', 80, 20); sqm.apply('dummy0', 60, 15)" && ok "réappliquer avec d'autres débits fonctionne (idempotent)" || bad "réapplication"
+tc qdisc show dev dummy0 | grep -q "bandwidth 15Mbit" && ok "les nouveaux débits sont pris en compte" || bad "débits non mis à jour"
+PYTHONPATH=/work python3 -B -c "from erouter import sqm; sqm.clear('dummy0')"
+tc qdisc show dev dummy0 | grep -q cake && bad "CAKE est resté après clear" || ok "clear retire tout (envoi, réception, IFB)"
+ip link show ifb4dummy0 >/dev/null 2>&1 && bad "l'interface IFB est restée" || ok "l'interface IFB est supprimée"
+ip link del dummy0 2>/dev/null
+
+section "Test de débit contre un serveur local"
+cat > /tmp/speed_server.py <<'PY'
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        size = int(self.path.split("bytes=")[1]) if "bytes=" in self.path else 0
+        self.send_response(200); self.send_header("Content-Length", str(size)); self.end_headers()
+        self.wfile.write(b"\0" * size)
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0); got = 0
+        while got < n: got += len(self.rfile.read(min(65536, n - got)))
+        self.send_response(200); self.send_header("Content-Length", "0"); self.end_headers()
+    def log_message(self, *a): pass
+ThreadingHTTPServer(("127.0.0.1", 8099), H).serve_forever()
+PY
+python3 /tmp/speed_server.py & sleep 1
+out=$(EROUTER_SPEEDTEST_URL=http://127.0.0.1:8099 PYTHONPATH=/work python3 -B - <<'PY'
+from erouter import speedtest
+speedtest.DOWN_BYTES, speedtest.UP_BYTES = 3_000_000, 2_000_000
+st = speedtest.Speedtest(); st._run("lo")
+r = st.status()["result"]
+print(r["down_mbit"], r["up_mbit"], r["bytes_used"], repr(r["error"]), st.status()["running"])
+PY
+)
+read -r down up used err running <<< "$out"
+awk -v d="$down" -v u="$up" 'BEGIN { exit !(d > 10 && u > 10) }' && ok "débits mesurés (réception $down, envoi $up Mbit/s) via curl lié à l'interface" || bad "débits : $out"
+[ "$used" = 5000000 ] && ok "volume consommé exact (5 000 000 o)" || bad "volume consommé : $used"
+[ "$err" = "''" ] && [ "$running" = False ] && ok "aucune erreur, test terminé" || bad "état final : $out"
+out=$(EROUTER_SPEEDTEST_URL=http://127.0.0.1:9 PYTHONPATH=/work python3 -B -c "
+from erouter import speedtest
+st = speedtest.Speedtest(); st._run('lo'); r = st.status()['result']; print(r['error'][:30])")
+echo "$out" | grep -q "Aucune réponse" && ok "serveur injoignable : erreur claire, pas de plantage" || bad "serveur injoignable : $out"
+
+section "Blocage des publicités avec un vrai dnsmasq et la vraie liste"
+ip link add br0 type bridge 2>/dev/null; ip addr add 10.1.0.1/24 dev br0 2>/dev/null; ip link set br0 up
+mkdir -p /tmp/adb && python3 -B - <<'PY'
+import sys; sys.path.insert(0, "/work")
+import copy, gzip, os
+from erouter import config, lan
+lan.RUN_DIR = "/tmp/adb"; lan.BLOCKLIST_RUN = "/tmp/adb/blocklist.hosts"
+cfg = config.sanitize(config.DEFAULTS); cfg["savings"]["block_ads"] = True
+path = lan.prepare_blocklist(cfg)
+from jinja2 import Environment, FileSystemLoader
+env = Environment(loader=FileSystemLoader("/work/erouter/templates"))
+open("/tmp/adb/dnsmasq.conf", "w").write(env.get_template("dnsmasq.conf.j2").render(
+    bridge="br0", gateway="10.1.0.1", netmask="255.255.255.0", start="10.1.0.100", end="10.1.0.200", lease="1h",
+    dns=["192.0.2.53"], leases="/tmp/adb/leases", blocklist=path))
+open("/tmp/adb/domain", "w").write(open(path).readline().split()[1])
+print("liste décompressée :", sum(1 for _ in open(path)), "domaines")
+PY
+check "dnsmasq --test avec la vraie liste" dnsmasq --test --conf-file=/tmp/adb/dnsmasq.conf
+(dnsmasq --keep-in-foreground --conf-file=/tmp/adb/dnsmasq.conf --port=5354 --no-dhcp-interface=br0 >/tmp/adb/dnsmasq.log 2>&1 &)
+sleep 3
+blocked=$(cat /tmp/adb/domain)
+ans=$(dig +short +time=2 +tries=1 @10.1.0.1 -p 5354 "$blocked" A)
+[ "$ans" = "0.0.0.0" ] && ok "domaine publicitaire ($blocked) : réponse 0.0.0.0" || bad "domaine bloqué : '$ans'"
+ans=$(dig +short +time=2 +tries=1 @10.1.0.1 -p 5354 example.org A)
+[ "$ans" != "0.0.0.0" ] && ok "domaine normal (example.org) : non bloqué" || bad "example.org bloqué"
+pkill dnsmasq; true
+
+section "QR code du Wi-Fi décodé par un lecteur de QR"
+n=0
+for pair in "MaBox|motdepasse-simple" "Ouifi|p:a\\ss,\"x;y" "Ma;Box|tres-long-mot-de-passe-0123456789-0123456789-0123456789-abcdef" "Café 5G ☕|mot-de-passe-?!"; do
+  ssid="${pair%%|*}"; pw="${pair#*|}"
+  PYTHONPATH=/work SSID="$ssid" PW="$pw" python3 -B -c "
+import os; from erouter import qr
+payload = qr.wifi_payload(os.environ['SSID'], os.environ['PW'])
+open('/tmp/q.payload', 'w').write(payload); open('/tmp/q.svg', 'wb').write(qr.svg(payload))"
+  rsvg-convert -w 900 /tmp/q.svg -o /tmp/q.png 2>/dev/null
+  decoded=$(zbarimg --raw -q /tmp/q.png 2>/dev/null | head -1)
+  n=$((n + 1))
+  if [ "$decoded" = "$(cat /tmp/q.payload)" ]; then ok "QR $n décodé à l'identique : $decoded"; else bad "QR $n : attendu $(cat /tmp/q.payload), lu '$decoded'"; fi
+done
+
+section "Diagnostic : aucun secret, même avec de vraies commandes"
+EROUTER_DATA=/tmp/diag EROUTER_CONFIG=/tmp/diag/erouter/config.yaml PYTHONPATH=/work python3 -B - <<'PY'
+import copy, sys
+from erouter import config, diagnostic
+cfg = config.sanitize(config.DEFAULTS)
+cfg["ap"]["password"] = "Mot-de-passe-secret-du-hotspot"
+cfg["web"]["password_hash"] = "scrypt:32768:8:1$sel$empreinte-secrete"
+cfg["web"]["secret"] = "s" * 64
+text = diagnostic.collect(cfg, {"uplink": {"ssid": "Partage"}}, {"version": "0.1.0"})
+open("/tmp/diag.txt", "w").write(text)
+print(len(text))
+PY
+size=$(wc -c < /tmp/diag.txt)
+[ "$size" -gt 1500 ] && ok "diagnostic produit ($size octets, commandes réelles exécutées)" || bad "diagnostic trop court ($size)"
+for secret in "Mot-de-passe-secret-du-hotspot" "empreinte-secrete" "ssssssssssssssss"; do
+  grep -q "$secret" /tmp/diag.txt && bad "le diagnostic contient un secret ($secret)" || ok "absent du diagnostic : ${secret:0:16}…"
+done
+grep -q "### Pare-feu" /tmp/diag.txt && grep -q "### Adresses" /tmp/diag.txt && ok "sections réseau présentes" || bad "sections manquantes"
+
+section "Verrouillage : détection de ce qui bloque (fichier swap sur périphérique loop)"
+truncate -s 8M /tmp/swapfile.img; loopdev=$(losetup -f --show /tmp/swapfile.img)
+sleep 60 > /tmp/open-for-write.log & holder=$!
+found=$(PYTHONPATH=/work python3 -B -c "
+from erouter import fs
+items = fs.blockers()
+print(fs.describe_blockers(items))")
+echo "$found" | grep -q "/tmp/swapfile.img" && ok "le périphérique loop adossé à un fichier de la racine est signalé" || bad "loop non signalé : $found"
+exec 7>/tmp/held-open.txt
+found=$(PYTHONPATH=/work python3 -B -c "
+from erouter import fs
+print(fs.describe_blockers(fs.blockers()))")
+echo "$found" | grep -q "/tmp/held-open.txt" && ok "un fichier ouvert en écriture est signalé (avec le nom du processus)" || bad "fichier ouvert non signalé : $found"
+exec 7>&-; kill "$holder" 2>/dev/null; losetup -d "$loopdev"
 
 section "Bilan"
 if [ "$FAIL" -eq 0 ]; then echo "TOUT EST OK"; else echo "$FAIL vérification(s) en échec"; fi

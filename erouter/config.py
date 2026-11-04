@@ -34,6 +34,23 @@ DEFAULTS = {
     "uplink": {
         "interface": "wlan0",
     },
+    "usage": {
+        "plan_gb": 0,                  # forfait mensuel en Go (0 = pas d'alerte)
+        "alert_percent": 80,           # alerte quand ce pourcentage du forfait est atteint
+        "reset_day": 1,                # jour du mois où le forfait repart à zéro (1-28)
+    },
+    "savings": {
+        "block_ads": False,            # blocage DNS des publicités et traqueurs
+        "limits": [],                  # [{"mac": "aa:bb:cc:dd:ee:ff", "down_mbit": 5, "up_mbit": 2}], 0 = illimité
+    },
+    "sqm": {
+        "enabled": False,              # anti-latence (CAKE) sur l'uplink
+        "down_mbit": 0,
+        "up_mbit": 0,
+    },
+    "setup": {
+        "done": False,                 # assistant de premier démarrage terminé
+    },
     "ssh": {
         "enabled": False,              # éteint par défaut ; s'active depuis l'interface (réseau du routeur uniquement)
         "user": "pi",                  # compte existant (uid >= 1000) dont on règle le mot de passe
@@ -49,6 +66,7 @@ DEFAULTS = {
 }
 
 _IFACE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}$")   # jamais de « - » en tête : pas pris pour une option
+_MAC = re.compile(r"^([0-9a-f]{2}:){5}[0-9a-f]{2}$")
 _USER = re.compile(r"^[a-z_][a-z0-9_-]{0,30}$")
 _LEASE = re.compile(r"^\d{1,5}[smhd]?$")
 _COUNTRY = re.compile(r"^[A-Z]{2}$")
@@ -103,6 +121,8 @@ def _validate(cfg):
     if not isinstance(ssh["user"], str) or not _USER.fullmatch(ssh["user"]):
         raise ValueError("Nom d'utilisateur SSH invalide")
 
+    _validate_extras(cfg)
+
     ssid, pw = ap["ssid"], ap["password"]
     if not isinstance(ssid, str) or not 1 <= len(ssid.encode()) <= 32 \
             or any(ord(c) < 32 or ord(c) == 127 for c in ssid):
@@ -137,6 +157,37 @@ def sanitize(cfg):
     return out
 
 
+def _int(value, lo, hi, what):
+    if isinstance(value, bool) or not isinstance(value, int) or not lo <= value <= hi:
+        raise ValueError(f"{what} : entier de {lo} à {hi}")
+    return value
+
+
+def _validate_extras(cfg):
+    usage, savings, sqm, setup = cfg["usage"], cfg["savings"], cfg["sqm"], cfg["setup"]
+    _int(usage["plan_gb"], 0, 100000, "Forfait (Go)")
+    _int(usage["alert_percent"], 1, 100, "Seuil d'alerte (%)")
+    _int(usage["reset_day"], 1, 28, "Jour de renouvellement")
+    if not isinstance(savings["block_ads"], bool) or not isinstance(setup["done"], bool) or not isinstance(sqm["enabled"], bool):
+        raise ValueError("Option invalide (attendu : vrai ou faux)")
+    limits = savings["limits"]
+    if not isinstance(limits, list) or len(limits) > 16:
+        raise ValueError("Limites par appareil : 16 au maximum")
+    seen = set()
+    for lim in limits:
+        if not isinstance(lim, dict) or set(lim) != {"mac", "down_mbit", "up_mbit"}:
+            raise ValueError("Limite par appareil invalide")
+        if not isinstance(lim["mac"], str) or not _MAC.fullmatch(lim["mac"]) or lim["mac"] in seen:
+            raise ValueError("Adresse MAC invalide ou en double (format aa:bb:cc:dd:ee:ff, minuscules)")
+        seen.add(lim["mac"])
+        down, up = _int(lim["down_mbit"], 0, 1000, "Débit descendant (Mbit/s)"), _int(lim["up_mbit"], 0, 1000, "Débit montant (Mbit/s)")
+        if not down and not up:
+            raise ValueError("Une limite doit fixer au moins un débit")
+    down, up = _int(sqm["down_mbit"], 0, 1000, "Débit descendant"), _int(sqm["up_mbit"], 0, 1000, "Débit montant")
+    if sqm["enabled"] and not (down and up):
+        raise ValueError("Anti-latence : indique les débits descendant et montant de la 5G (Mbit/s)")
+
+
 def _read():
     try:
         with open(CONFIG_PATH) as f:
@@ -145,7 +196,10 @@ def _read():
         data = {}
     if not isinstance(data, dict):
         data = {}
-    return _merge(DEFAULTS, data)
+    cfg = _merge(DEFAULTS, data)
+    if "setup" not in data and cfg["web"]["password_hash"]:
+        cfg["setup"]["done"] = True       # installation antérieure à l'assistant : déjà configurée, on ne le rouvre pas
+    return cfg
 
 
 def load():

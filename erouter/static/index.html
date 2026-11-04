@@ -8,6 +8,7 @@
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="/static/app.css">
 <script src="/static/app.js" defer></script>
+<script src="/static/features.js" defer></script>
 </head>
 <body>
 
@@ -24,7 +25,7 @@
 <div id="app" hidden>
 <header>
   <div class="brand"><span class="logo">⇄</span> EmergencyRouter</div>
-  <div class="row"><button id="sshBtn">SSH</button><button id="pwBtn">Mot de passe</button><button id="logoutBtn">Déconnexion</button></div>
+  <div class="row"><button id="toolsBtn">Outils</button><button id="sshBtn">SSH</button><button id="pwBtn">Mot de passe</button><button id="logoutBtn">Déconnexion</button></div>
 </header>
 <main>
   <div class="banner" id="warnings" hidden></div>
@@ -41,6 +42,29 @@
     <div class="hero"><span class="dot" id="apDot"></span>
       <div><div class="big" id="apTitle">…</div><div class="muted" id="apSub"></div></div></div>
     <div class="kv" id="apKv"></div>
+  </section>
+
+  <section class="card wide" id="usageCard">
+    <div class="row head"><h2>Consommation de données (5G)</h2><button id="usageReset" class="danger">Remettre à zéro</button></div>
+    <div class="cols">
+      <div>
+        <div class="stats">
+          <div><div class="muted small">Aujourd'hui</div><div class="big" id="usToday">—</div><div class="muted small" id="usTodaySub"></div></div>
+          <div><div class="muted small" id="usPeriodLabel">Cette période</div><div class="big" id="usPeriod">—</div><div class="muted small" id="usPeriodSub"></div></div>
+        </div>
+        <progress id="usProgress" max="100" value="0" hidden></progress>
+        <p class="muted small" id="usClock" hidden>L'heure n'est pas encore synchronisée : la consommation est comptée mais pas encore datée.</p>
+        <form id="usageForm">
+          <div class="row">
+            <label>Forfait (Go)<input id="usPlan" type="number" min="0" max="100000" step="1"></label>
+            <label>Alerte (%)<input id="usAlert" type="number" min="1" max="100" step="1"></label>
+            <label>Renouvellement (jour)<input id="usDay" type="number" min="1" max="28" step="1"></label>
+          </div>
+          <button class="primary">Enregistrer</button>
+        </form>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Appareil</th><th>Reçu</th><th>Envoyé</th><th>Total</th></tr></thead><tbody id="usDevices"></tbody></table></div>
+    </div>
   </section>
 
   <section class="card wide">
@@ -75,6 +99,66 @@
         <label>DHCP fin<input id="lanEnd" required></label>
       </div>
       <label>DNS (séparés par des virgules)<input id="lanDns"></label>
+      <button class="primary">Enregistrer</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Qualité de la connexion (24 h)</h2>
+    <div class="chart-block"><div class="row"><span class="muted small">Latence</span><span class="small right" id="chLatNow"></span></div>
+      <svg class="chart" id="chLat" viewBox="0 0 300 60" preserveAspectRatio="none" role="img" aria-label="Latence sur 24 heures"></svg></div>
+    <div class="chart-block"><div class="row"><span class="muted small">Signal Wi-Fi</span><span class="small right" id="chSigNow"></span></div>
+      <svg class="chart" id="chSig" viewBox="0 0 300 60" preserveAspectRatio="none" role="img" aria-label="Signal sur 24 heures"></svg></div>
+    <div class="chart-block"><div class="row"><span class="muted small">Débit (reçu / envoyé)</span><span class="small right" id="chRateNow"></span></div>
+      <svg class="chart" id="chRate" viewBox="0 0 300 60" preserveAspectRatio="none" role="img" aria-label="Débit sur 24 heures"></svg></div>
+    <p class="muted small" id="chEmpty" hidden>Les courbes se remplissent au fil du temps (un point toutes les 30 secondes, perdus au redémarrage).</p>
+  </section>
+
+  <section class="card">
+    <div class="row head"><h2>Test de débit</h2><button id="speedBtn" class="primary">Lancer le test</button></div>
+    <p class="muted small">Mesure la 5G depuis le routeur et consomme environ 35 Mo.</p>
+    <div class="stats">
+      <div><div class="muted small">Réception</div><div class="big" id="spDown">—</div></div>
+      <div><div class="muted small">Envoi</div><div class="big" id="spUp">—</div></div>
+      <div><div class="muted small">Latence</div><div class="big" id="spPing">—</div></div>
+    </div>
+    <p class="muted small" id="spStatus"></p>
+    <div class="list" id="spHistory"></div>
+    <button id="speedSqm" hidden>Utiliser ces débits pour l'anti-latence (85 %)</button>
+  </section>
+
+  <section class="card wide">
+    <h2>Économies de données et latence</h2>
+    <form id="savingsForm">
+      <div class="cols3">
+        <fieldset>
+          <legend>Publicités et traqueurs</legend>
+          <label class="check"><input id="adsOn" type="checkbox"> Bloquer</label>
+          <p class="muted small">Bloque environ 77 000 domaines publicitaires au niveau du DNS, pour tous les appareils. Peut empêcher quelques sites de fonctionner.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Anti-latence (CAKE)</legend>
+          <label class="check"><input id="sqmOn" type="checkbox"> Activer</label>
+          <div class="row">
+            <label>Réception (Mbit/s)<input id="sqmDown" type="number" min="0" max="1000" step="1"></label>
+            <label>Envoi (Mbit/s)<input id="sqmUp" type="number" min="0" max="1000" step="1"></label>
+          </div>
+          <p class="muted small">Évite que la connexion devienne très lente quand quelqu'un télécharge. Indique des débits un peu inférieurs à ceux de la 5G.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Plafond par appareil</legend>
+          <div class="list" id="limList"></div>
+          <div class="row">
+            <label>Appareil<select id="limDev"></select></label>
+          </div>
+          <div class="row wrap">
+            <label>Réception (Mbit/s)<input id="limDown" type="number" min="0" max="1000" step="1" value="0"></label>
+            <label>Envoi (Mbit/s)<input id="limUp" type="number" min="0" max="1000" step="1" value="0"></label>
+          </div>
+          <button type="button" id="limAdd">Ajouter ce plafond</button>
+          <p class="muted small">0 = pas de limite. Le plafond suit l'appareil même si son adresse IP change.</p>
+        </fieldset>
+      </div>
       <button class="primary">Enregistrer</button>
     </form>
   </section>
@@ -115,6 +199,34 @@
     <p class="muted small" id="sshHelp"></p>
     <p class="error" id="sshErr"></p>
     <div class="row"><button type="button" id="sshCancel">Annuler</button><button class="primary">Enregistrer</button></div>
+  </form>
+</dialog>
+<dialog id="toolsDlg">
+  <h3>Outils</h3>
+  <div class="stack">
+    <button id="toolWizard">Assistant de configuration</button>
+    <button id="toolQr">QR code du Wi-Fi</button>
+    <a class="btn" href="/api/diagnostic" download>Exporter un diagnostic</a>
+    <a class="btn" href="/api/backup" download>Sauvegarder la configuration</a>
+    <label class="btn" for="restoreFile">Restaurer une sauvegarde</label>
+    <input type="file" id="restoreFile" accept="application/json,.json" hidden>
+  </div>
+  <p class="muted small">La sauvegarde contient le mot de passe du hotspot : garde-la en lieu sûr. Le Wi-Fi de la 5G et le mot de passe SSH ne sont pas inclus. Le diagnostic ne contient aucun mot de passe.</p>
+  <p class="error" id="toolsErr"></p>
+  <button id="toolsClose">Fermer</button>
+</dialog>
+<dialog id="qrDlg">
+  <h3>QR code du Wi-Fi</h3>
+  <p class="muted small" id="qrText"></p>
+  <img id="qrImg" alt="QR code pour rejoindre le Wi-Fi du hotspot" width="260" height="260">
+  <button id="qrClose">Fermer</button>
+</dialog>
+<dialog id="wizDlg">
+  <form id="wizForm">
+    <h3 id="wizTitle"></h3>
+    <div id="wizBody"></div>
+    <p class="error" id="wizErr"></p>
+    <div class="row"><button type="button" id="wizSkip">Passer</button><button type="button" id="wizPrev">Précédent</button><button class="primary" id="wizNext">Suivant</button></div>
   </form>
 </dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
