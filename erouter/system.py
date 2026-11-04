@@ -5,10 +5,10 @@ import re
 import subprocess
 
 
-def run(cmd, timeout=20, check=False):
+def run(cmd, timeout=20, check=False, input_text=None):
     """Exécute une commande (liste d'arguments, jamais de shell) avec un délai maximal."""
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, input=input_text)
     except subprocess.TimeoutExpired:
         p = subprocess.CompletedProcess(cmd, 124, "", f"{cmd[0]} : délai dépassé")
     except FileNotFoundError:

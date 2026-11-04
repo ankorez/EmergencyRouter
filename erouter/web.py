@@ -308,6 +308,19 @@ def set_settings():
     return jsonify(ok=True)
 
 
+@app.post("/api/ssh")
+@auth
+def set_ssh():
+    d = request.get_json()
+    password = d.get("password") or None
+    if password is not None and not isinstance(password, str):
+        return err("Mot de passe invalide")
+    try:
+        return jsonify(rpc.call("set_ssh", enabled=bool(d.get("enabled")), password=password))
+    except RuntimeError as e:
+        return err(e)
+
+
 @app.get("/api/clients")
 @auth
 def clients():

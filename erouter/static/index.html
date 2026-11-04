@@ -79,6 +79,19 @@
     </form>
   </section>
 
+  <section class="card">
+    <h2>Accès SSH</h2>
+    <div class="hero"><span class="dot" id="sshDot"></span>
+      <div><div class="big" id="sshTitle">…</div><div class="muted" id="sshSub"></div></div></div>
+    <form id="sshForm">
+      <label>Utilisateur<input id="sshUser" readonly></label>
+      <label>Mot de passe SSH<input id="sshPw" type="password" autocomplete="new-password" minlength="12" maxlength="64"></label>
+      <label class="check"><input id="sshOn" type="checkbox"> Activer le SSH</label>
+      <button class="primary">Enregistrer</button>
+    </form>
+    <p class="muted small" id="sshHelp"></p>
+  </section>
+
   <section class="card wide">
     <h2>Appareils connectés</h2>
     <div class="table-wrap"><table><thead><tr><th>Nom</th><th>IP</th><th>MAC</th><th>Type</th></tr></thead><tbody id="clients"></tbody></table></div>

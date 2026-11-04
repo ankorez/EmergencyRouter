@@ -17,6 +17,7 @@ state = {
     "warnings": [],
     "fs": {"available": False, "enabled": False, "locked": False, "rescue": False, "data": "none"},
     "tls": {"enabled": False, "ready": False, "fingerprint": ""},
+    "ssh": {"enabled": False, "active": False, "user": "pi", "password_set": False},
 }
 
 TICK = 5
@@ -30,6 +31,8 @@ _applied_base = None           # (lan, uplink, port web) réellement appliqué
 _base_failed_at = 0.0
 BASE_RETRY = 30                # s entre deux essais si l'application de la config échoue
 _tls_failed_at = 0.0
+_ssh_failed_at = 0.0
+SSH_RETRY = 30                 # s entre deux tentatives de démarrage de sshd
 
 
 def snapshot():
@@ -67,6 +70,25 @@ def _maintain_tls(cfg):
     except Exception:
         _tls_failed_at = time.monotonic()
         log.exception("impossible de créer le certificat HTTPS (l'interface restera en HTTP)")
+
+
+def _sync_ssh(cfg):
+    """Démarre ou arrête sshd selon la config (réglage persistant dans /data, sans toucher au système en lecture seule).
+    Retourne True si sshd tourne."""
+    global _ssh_failed_at
+    want = bool(cfg["ssh"]["enabled"])
+    active = system.run(["systemctl", "is-active", "--quiet", "ssh"]).returncode == 0
+    if want and not active and time.monotonic() - _ssh_failed_at >= SSH_RETRY:
+        system.run(["systemctl", "stop", "ssh.socket"])        # l'activation par socket occuperait le port 22
+        started = system.run(["systemctl", "start", "ssh"]).returncode == 0
+        if not started:
+            _ssh_failed_at = time.monotonic()
+            log.error("sshd n'a pas pu démarrer")
+        active = started
+    elif not want and active:
+        system.run(["systemctl", "stop", "ssh.socket", "ssh"])
+        active = False
+    return active
 
 
 def _desired_channel(cfg, link):
@@ -128,6 +150,9 @@ def _tick():
     if link["connected"] and system.is_dfs(link["freq"]):
         warnings.append("L'uplink est sur un canal DFS : le hotspot risque de ne pas démarrer.")
 
+    ssh_active = _sync_ssh(cfg)
+    if cfg["ssh"]["enabled"] and not ssh_active:
+        warnings.append("Le SSH est activé mais le serveur n'a pas pu démarrer.")
     fs_state = fs.status()
     if fs_state["data"] == "reset":
         warnings.append("La partition de données était abîmée (coupure de courant ?) : elle a été recréée. "
@@ -147,6 +172,8 @@ def _tick():
         state["warnings"] = warnings
         state["fs"] = fs_state
         state["tls"] = tls.status(cfg["web"]["tls"])
+        state["ssh"] = {"enabled": bool(cfg["ssh"]["enabled"]), "active": ssh_active, "user": cfg["ssh"]["user"],
+                        "password_set": bool(cfg["ssh"]["password_set"])}
 
 
 def run_forever(stop):

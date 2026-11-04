@@ -33,8 +33,8 @@ le **système en lecture seule** : on peut couper le courant à tout moment.
 ./build-image.sh        # Docker requis, ~25 Go libres dans la VM Docker ; résultat : dist/*.img.xz + SHA256SUMS
 ```
 
-1. Flasher avec Raspberry Pi Imager (« Utiliser un fichier personnalisé »). Le compte d'administration est déjà dans
-   l'image (voir « Accès SSH ») : **ne règle pas d'utilisateur dans l'Imager**. Vérifie l'empreinte avec
+1. Flasher avec Raspberry Pi Imager (« Utiliser un fichier personnalisé »). Le compte `pi` est déjà dans l'image
+   (voir « Accès SSH ») : **ne règle pas d'utilisateur dans l'Imager**. Vérifie l'empreinte avec
    `shasum -a 256 -c SHA256SUMS`.
 2. Au premier démarrage, le hotspot **`ERouter-Setup`** (mot de passe `erouter-setup`) sert à la configuration.
 3. Ouvre **https://192.168.1.1/** (ou `https://erouter.local/`) : le navigateur avertit que le certificat est auto-signé
@@ -43,20 +43,21 @@ le **système en lecture seule** : on peut couper le courant à tout moment.
 
 ### Accès SSH
 
-L'image contient un compte d'administration **par clé uniquement** : `build-image.sh` y met ta clé publique
-(`~/.ssh/id_ed25519.pub`, sinon `id_ecdsa.pub`, sinon `id_rsa.pub`) et crée l'utilisateur `pi`.
+Éteint par défaut. Pour l'activer, dans l'interface, carte **« Accès SSH »** : choisis un mot de passe (12 caractères
+minimum), coche « Activer le SSH » et enregistre. Puis :
 
 ```
 ssh pi@192.168.1.1        # depuis le hotspot ERouter-Setup ou le câble Ethernet du Pi
 ```
 
 - Le SSH n'est joignable que depuis le **réseau du routeur** (hotspot ou Ethernet), jamais depuis l'uplink (Wi-Fi de la box, 5G).
-- Pas de mot de passe : celui du compte est aléatoire et jamais conservé ; la connexion par mot de passe est désactivée.
-  `sudo` fonctionne sans mot de passe pour ce compte.
-- Réglages du build : `SSH_USER=nom` (défaut `pi`), `SSH_PUBKEY_FILE=chemin/clé.pub`, ou `NO_ADMIN_USER=1` pour une image
-  sans compte (à créer alors avec Raspberry Pi Imager).
-- L'image contient ta clé **publique** (le commentaire de la clé, qui trahit le nom de ta machine, n'est pas copié) : si tu
-  publies l'image, personne d'autre ne pourra s'y connecter. Si tu perds ta clé, il faut reflasher.
+- Le compte est `pi` (réglable au build avec `SSH_USER=nom`) ; l'image n'a ni mot de passe par défaut ni clé : tant que tu n'as
+  rien défini dans l'interface, personne ne peut se connecter. `sudo` demande ce même mot de passe.
+- Le mot de passe est refusé s'il est trop court ou prévisible (contient le nom du compte, « password », « azerty »…).
+- Changer le mot de passe repasse le système en écriture **une seconde**, puis le reverrouille. Le réglage « activé ou non »
+  est mémorisé dans `/data` : il survit aux redémarrages, sans toucher au système.
+- Protections : `root` interdit, 3 essais maximum, 12 nouvelles connexions par minute, pas de redirection de ports.
+- `NO_ADMIN_USER=1 ./build-image.sh` construit une image sans compte (à créer alors avec Raspberry Pi Imager).
 - Après un reflash, `ssh-keygen -R 192.168.1.1` (et `-R erouter.local`) évite l'avertissement « clé d'hôte modifiée ».
 
 ### Installation manuelle sur Raspberry Pi OS Lite
@@ -102,7 +103,7 @@ Un routeur de secours dort longtemps puis subit une coupure de courant. L'image 
 
 - Une coupure de courant ne peut donc abîmer que `erdata`, qui est **vérifiée à chaque démarrage** (`e2fsck -f`) :
   réparée si possible, **recréée avec la config par défaut** sinon (l'interface t'en avertit). Le démarrage n'est jamais bloqué.
-- Le système n'est écrit que pendant le démarrage (le temps que tout soit lancé), puis verrouillé.
+- Le système n'est écrit que pendant le démarrage (le temps que tout soit lancé), puis verrouillé ; seule exception : une seconde quand tu changes le mot de passe SSH.
 - La racine n'est **pas** agrandie au premier démarrage (le mot `resize` est retiré de `cmdline.txt`) : le reste de la carte est inutilisé.
 - Journaux et baux DHCP en RAM, pas de swap, pas de mises à jour automatiques.
 - L'état se voit et se règle en ligne de commande : `sudo erouter-fs status | lock | unlock`. L'interface n'affiche que les

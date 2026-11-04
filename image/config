@@ -6,8 +6,8 @@ KEYBOARD_KEYMAP=fr
 KEYBOARD_LAYOUT="French"
 TIMEZONE_DEFAULT=Europe/Paris
 WPA_COUNTRY=FR
-# SSH activé. Le compte d'administration (clé uniquement) est ajouté par build-image.sh : voir image/ssh-config.sh.
-ENABLE_SSH=1
+# Le SSH est éteint dans l'image : il s'active depuis l'interface web. Le compte « pi » est ajouté par build-image.sh.
+ENABLE_SSH=0
 # Raspberry Pi OS Lite (stages 0 à 2) + notre étape
 STAGE_LIST="stage0 stage1 stage2 stage-erouter"
 DEPLOY_COMPRESSION=none

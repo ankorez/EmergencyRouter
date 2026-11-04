@@ -139,35 +139,80 @@ loc=$(curl -sI http://127.0.0.1:8080/api/x?y=1 | tr -d '\r' | awk 'tolower($1)==
 ps -eo user,args | grep -v grep | grep -q "^erouter .*erouter.webd" && ok "le serveur tourne sous l'utilisateur erouter, pas root" || bad "utilisateur du serveur"
 grep -i -E "traceback|error" /tmp/web.log | head -3 | sed 's/^/    /'
 
-section "Compte d'administration SSH (clé uniquement)"
-ssh-keygen -q -t ed25519 -N '' -C 'jean@portable; echo pwned' -f /tmp/k
-bash /work/image/ssh-config.sh /tmp/k.pub pi > /tmp/cfg1 2>/tmp/cfg.err; rc=$?
-[ "$rc" -eq 0 ] && ok "ssh-config.sh : clé valide acceptée" || { bad "ssh-config.sh a échoué"; cat /tmp/cfg.err; }
-bash /work/image/ssh-config.sh /tmp/k.pub pi > /tmp/cfg2
-blob=$(awk '{print $2}' /tmp/k.pub)
+section "Accès SSH par mot de passe, depuis l'interface"
+bash /work/image/ssh-config.sh pi > /tmp/cfg1 2>/tmp/cfg.err && ok "ssh-config.sh : config du build générée" || { bad "ssh-config.sh a échoué"; cat /tmp/cfg.err; }
+bash /work/image/ssh-config.sh pi > /tmp/cfg2
 (
   # shellcheck disable=SC1091
   . /tmp/cfg1
-  [ "$FIRST_USER_NAME" = pi ] && [ "$PUBKEY_ONLY_SSH" = 1 ] && [ "$DISABLE_FIRST_BOOT_USER_RENAME" = 1 ] && [ "$PASSWORDLESS_SUDO" = 1 ] \
-    && [ "$PUBKEY_SSH_FIRST_USER" = "ssh-ed25519 $blob erouter-admin" ] && [ "${#FIRST_USER_PASS}" -ge 30 ]
-) && ok "la config relue par bash est exacte (clé sans son commentaire, mot de passe long)" || bad "config relue incorrecte"
-grep -q "pwned\|portable" /tmp/cfg1 && bad "le commentaire de la clé a fuité dans l'image" || ok "le commentaire de la clé (nom de ta machine) n'est pas injecté"
+  [ "$FIRST_USER_NAME" = pi ] && [ "$DISABLE_FIRST_BOOT_USER_RENAME" = 1 ] && [ "$ENABLE_SSH" = 0 ] \
+    && [ "${#FIRST_USER_PASS}" -ge 40 ] && [[ "$FIRST_USER_PASS" =~ ^[A-Za-z0-9+/=]+$ ]]
+) && ok "la config relue par bash est exacte (SSH éteint, mot de passe aléatoire sans caractère spécial)" || bad "config relue incorrecte"
 [ "$(grep FIRST_USER_PASS /tmp/cfg1)" != "$(grep FIRST_USER_PASS /tmp/cfg2)" ] && ok "mot de passe aléatoire différent à chaque build" || bad "mot de passe identique"
-bash /work/image/ssh-config.sh /tmp/k pi >/dev/null 2>&1 && bad "une clé PRIVÉE a été acceptée" || ok "clé privée refusée"
 for u in "Bad User" 'x;rm -rf /' '-oProxy' 'Root'; do
-  bash /work/image/ssh-config.sh /tmp/k.pub "$u" >/dev/null 2>&1 && bad "nom d'utilisateur accepté : '$u'" || ok "nom d'utilisateur refusé : '$u'"
+  bash /work/image/ssh-config.sh "$u" >/dev/null 2>&1 && bad "nom d'utilisateur accepté : '$u'" || ok "nom d'utilisateur refusé : '$u'"
 done
-[ "$(bash /work/image/ssh-config.sh /tmp/k.pub | grep '^FIRST_USER_NAME=')" = "FIRST_USER_NAME=pi" ] && ok "utilisateur par défaut : pi" || bad "utilisateur par défaut"
-echo "ssh-dss AAAAB3NzaC1kc3MAAACB comment" > /tmp/dss.pub
-bash /work/image/ssh-config.sh /tmp/dss.pub >/dev/null 2>&1 && bad "type de clé obsolète accepté" || ok "type de clé obsolète (dsa) refusé"
-: > /tmp/empty.pub
-bash /work/image/ssh-config.sh /tmp/empty.pub >/dev/null 2>&1 && bad "fichier vide accepté" || ok "fichier vide refusé"
+grep -q "pwned\|SSH_PASSWORD" /tmp/cfg1 && bad "fuite dans la config" || ok "aucun secret ni clé de l'utilisateur dans la config du build"
+
 ssh-keygen -A >/dev/null 2>&1; mkdir -p /etc/ssh/sshd_config.d; cp /work/image/90-erouter-sshd.conf /etc/ssh/sshd_config.d/90-erouter.conf
 check "sshd -t : configuration valide avec le durcissement" /usr/sbin/sshd -t
 eff=$(/usr/sbin/sshd -T 2>/dev/null)
-for want in "permitrootlogin no" "passwordauthentication no" "kbdinteractiveauthentication no" "maxauthtries 3" "allowtcpforwarding no" "x11forwarding no"; do
+for want in "permitrootlogin no" "passwordauthentication yes" "kbdinteractiveauthentication no" "maxauthtries 3" "allowtcpforwarding no" "x11forwarding no"; do
   echo "$eff" | grep -qx "$want" && ok "sshd effectif : $want" || bad "sshd effectif : $want absent"
 done
+
+# Vrai chpasswd + vraie vérification du hash (libcrypt), sur un vrai compte
+useradd -m -u 1000 -s /bin/bash pi 2>/dev/null
+W2=/tmp/sshtest; rm -rf $W2; mkdir -p $W2
+export EROUTER_DATA=$W2 EROUTER_CONFIG=$W2/erouter/config.yaml
+cat > /tmp/crypt_check.py <<'PY'
+import ctypes, ctypes.util
+_c = ctypes.CDLL(ctypes.util.find_library("crypt") or "libcrypt.so.1")
+_c.crypt.restype, _c.crypt.argtypes = ctypes.c_char_p, [ctypes.c_char_p, ctypes.c_char_p]
+def hash_of(user):
+    for line in open("/etc/shadow"):
+        f = line.split(":")
+        if f[0] == user:
+            return f[1]
+def verify(user, password):
+    h = hash_of(user)
+    return h not in ("", "*", "!", None) and _c.crypt(password.encode(), h.encode()).decode() == h
+PY
+cat > /tmp/sshtest.py <<'PY'
+import sys
+sys.path[:0] = ["/work", "/tmp"]
+from erouter import agentd, config
+import crypt_check as cc
+SPECIAL = 'Une-phrase "secrète" $HOME \\ `x` : fin!'
+SPECIAL = SPECIAL.replace("è", "e")
+results = []
+def check(name, ok): results.append((name, ok))
+config.save(config.sanitize(config.DEFAULTS))
+r = agentd.m_set_ssh(True, SPECIAL)
+check("m_set_ssh renvoie l'état attendu", r == {"enabled": True, "password_set": True, "user": "pi"})
+check("le mot de passe (avec guillemets, $, \\, backticks, deux-points) fonctionne vraiment", cc.verify("pi", SPECIAL))
+check("un autre mot de passe est refusé par le hash", not cc.verify("pi", SPECIAL + "x"))
+check("hash moderne (yescrypt)", cc.hash_of("pi").startswith("$y$"))
+check("réglage persistant écrit dans la config", config.load_for_agent()["ssh"] == {"enabled": True, "user": "pi", "password_set": True})
+before = cc.hash_of("pi")
+for bad_pw in ("court", "motdepasse-12345", "pi-pi-pi-pi-pi-pi"):
+    try: agentd.m_set_ssh(True, bad_pw); check(f"refusé : {bad_pw}", False)
+    except ValueError: check(f"refusé : {bad_pw}", True)
+check("un mot de passe refusé ne modifie rien", cc.hash_of("pi") == before)
+cfg = config.load_for_agent(); cfg["ssh"]["user"] = "root"; config.save(cfg)
+rootbefore = cc.hash_of("root")
+try: agentd.m_set_ssh(True, SPECIAL); check("root refusé", False)
+except ValueError: check("root refusé", True)
+check("le mot de passe de root n'a pas été touché", cc.hash_of("root") == rootbefore)
+for name, ok in results:
+    print(("OK  " if ok else "KO  ") + name)
+sys.exit(0 if all(ok for _, ok in results) else 1)
+PY
+out=$(python3 -B /tmp/sshtest.py 2>&1); rc=$?
+echo "$out" | grep -v "^KO" | sed 's/^OK  /  ✔ /'
+echo "$out" | grep "^KO" | sed 's/^KO  /  ✘ /'
+[ "$rc" -eq 0 ] || FAIL=$((FAIL + 1))
+unset EROUTER_DATA EROUTER_CONFIG
 
 section "Bilan"
 if [ "$FAIL" -eq 0 ]; then echo "TOUT EST OK"; else echo "$FAIL vérification(s) en échec"; fi

@@ -4,10 +4,11 @@ C'est le SEUL processus qui écrit la configuration (dans /data) ; le service we
 et ne peut demander que les méthodes de METHODS, dont chacune valide ses paramètres.
 """
 import logging
+import pwd
 import subprocess
 import threading
 
-from . import agent, config, lan, rpc, system
+from . import agent, config, fs, lan, rpc, system
 
 log = logging.getLogger("erouter.agentd")
 
@@ -61,13 +62,59 @@ def m_save_config(cfg):
     return True
 
 
+SSH_PASSWORD_MIN, SSH_PASSWORD_MAX = 12, 64
+_WEAK = ("password", "motdepasse", "changeme", "erouter", "raspberry", "azerty", "qwerty", "123456")
+
+
+def _check_ssh_user(user):
+    """Jamais root ni un compte système : seul un vrai compte utilisateur peut recevoir un mot de passe SSH."""
+    try:
+        entry = pwd.getpwnam(user)
+    except KeyError:
+        raise ValueError(f"L'utilisateur « {user} » n'existe pas sur ce système")
+    if entry.pw_uid < 1000 or entry.pw_shell.endswith(("nologin", "false")):
+        raise ValueError(f"« {user} » est un compte système : refusé")
+
+
+def _check_ssh_password(password, user):
+    if not isinstance(password, str) or not SSH_PASSWORD_MIN <= len(password) <= SSH_PASSWORD_MAX:
+        raise ValueError(f"Mot de passe SSH : {SSH_PASSWORD_MIN} à {SSH_PASSWORD_MAX} caractères")
+    if not all(32 <= ord(c) < 127 for c in password) or password != password.strip():
+        raise ValueError("Mot de passe SSH : caractères ASCII imprimables, sans espace au début ni à la fin")
+    lower = password.lower()
+    for weak in (user, *_WEAK):
+        if weak in lower:
+            raise ValueError(f"Mot de passe SSH trop prévisible (contient « {weak} »)")
+
+
+def m_set_ssh(enabled, password=None):
+    """Active/désactive le SSH et/ou change le mot de passe du compte. Le SSH n'est joignable que depuis le LAN."""
+    cfg = config.load_for_agent()
+    ssh = cfg["ssh"]
+    user = ssh["user"]
+    _check_ssh_user(user)
+    if password:
+        _check_ssh_password(password, user)
+        with fs.writable():     # /etc/shadow est sur le système (lecture seule) : fenêtre d'écriture d'une seconde
+            r = system.run(["chpasswd"], input_text=f"{user}:{password}\n")
+        if r.returncode != 0:
+            raise RuntimeError("Impossible de changer le mot de passe")
+        ssh["password_set"] = True
+    if enabled and not ssh["password_set"]:
+        raise ValueError("Définis d'abord un mot de passe SSH")
+    ssh["enabled"] = bool(enabled)
+    config.save(cfg)
+    agent.request_apply()
+    return {"enabled": ssh["enabled"], "password_set": ssh["password_set"], "user": user}
+
+
 def m_reboot():
     subprocess.Popen(["systemctl", "reboot"])
     return True
 
 
 METHODS = {"status": m_status, "scan": m_scan, "connect": m_connect, "forget": m_forget,
-           "clients": m_clients, "save_config": m_save_config, "reboot": m_reboot}
+           "clients": m_clients, "save_config": m_save_config, "set_ssh": m_set_ssh, "reboot": m_reboot}
 
 
 def _ensure_secret():

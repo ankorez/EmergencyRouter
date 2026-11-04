@@ -2,10 +2,12 @@
 
 Aucun accès au système réel : l'agent est simulé (sauf la validation/enregistrement de config, qui est réel).
 """
+import contextlib
 import copy
 import http.client
 import json
 import os
+import pwd
 import subprocess
 import sys
 import tempfile
@@ -52,6 +54,8 @@ class ConfigTests(unittest.TestCase):
             "ports identiques": lambda c: c["web"].__setitem__("http_port", 443),
             "port de redirection réservé": lambda c: c["web"].__setitem__("http_port", 53),
             "tls non booléen": lambda c: c["web"].__setitem__("tls", "oui"),
+            "utilisateur ssh avec option": lambda c: c["ssh"].__setitem__("user", "-oProxyCommand=x"),
+            "ssh activé non booléen": lambda c: c["ssh"].__setitem__("enabled", "oui"),
             "section absente": lambda c: c.pop("lan"),
         }
         for name, mutate in cases.items():
@@ -210,6 +214,23 @@ class FsTests(unittest.TestCase):
             fs.maintain()
         self.assertFalse(self.ro)
 
+    def test_writable_window_unlocks_then_relocks(self):
+        with fs.writable():
+            self.assertFalse(self.ro)
+        self.assertTrue(self.ro)
+        self.assertEqual(self.remounts, ["rw", "ro"])
+
+    def test_writable_window_is_a_noop_when_not_locked(self):
+        self.ro = False
+        with fs.writable():
+            pass
+        self.assertEqual(self.remounts, [])
+
+    def test_window_relocks_even_if_the_block_fails(self):
+        with self.assertRaises(ValueError), fs.writable():
+            raise ValueError("boum")
+        self.assertTrue(self.ro)
+
 
 class TlsHelperTests(unittest.TestCase):
     def test_validity_is_long_even_with_a_wrong_clock(self):
@@ -320,6 +341,123 @@ class AgentTlsTests(unittest.TestCase):
         ensure.assert_not_called()
 
 
+def _account(uid=1000, shell="/bin/bash"):
+    return pwd.struct_passwd(("pi", "x", uid, uid, "", "/home/pi", shell))
+
+
+class AgentSshTests(unittest.TestCase):
+    """Le mot de passe SSH se change depuis l'interface : jamais en argument, jamais pour root, jamais faible."""
+
+    def setUp(self):
+        self.runs = []
+        self.account = _account()
+        self.chpasswd_rc = 0
+
+        def fake_run(cmd, timeout=20, check=False, input_text=None):
+            self.runs.append((cmd, input_text))
+            return mock.Mock(returncode=self.chpasswd_rc if cmd[0] == "chpasswd" else 0, stdout="", stderr="")
+
+        def getpwnam(name):
+            if self.account is None:
+                raise KeyError(name)
+            return self.account
+
+        for p in (mock.patch.object(agentd.pwd, "getpwnam", getpwnam), mock.patch.object(agentd.system, "run", fake_run),
+                  mock.patch.object(agentd.fs, "writable", contextlib.nullcontext), mock.patch.object(agentd.agent, "request_apply")):
+            p.start()
+            self.addCleanup(p.stop)
+        config.save(config.sanitize(config.DEFAULTS))
+
+    GOOD = "Une-phrase-secrete 42 \"!"
+
+    def test_password_goes_through_stdin_never_argv(self):
+        r = agentd.m_set_ssh(True, self.GOOD)
+        self.assertEqual(r, {"enabled": True, "password_set": True, "user": "pi"})
+        self.assertIn((["chpasswd"], f"pi:{self.GOOD}\n"), self.runs)
+        self.assertFalse(any(self.GOOD in " ".join(cmd) for cmd, _ in self.runs), "le mot de passe ne doit pas être dans la ligne de commande")
+        self.assertTrue(config.load_for_agent()["ssh"]["enabled"])
+        self.assertTrue(config.load_for_agent()["ssh"]["password_set"])
+
+    def test_rejects_weak_or_malformed_passwords(self):
+        for bad in ("court", "x" * 65, "avec\nretour-a-la-ligne", " espace-au-debut-xx", "motdepasse-12345",
+                    "ma-phrase-pi-12345", "accentué-12345678", "ERouter-123456789"):
+            with self.subTest(bad), self.assertRaises(ValueError):
+                agentd.m_set_ssh(True, bad)
+        self.assertFalse(any(cmd == ["chpasswd"] for cmd, _ in self.runs), "rien n'est modifié si le mot de passe est refusé")
+
+    def test_cannot_enable_without_a_password(self):
+        with self.assertRaises(ValueError):
+            agentd.m_set_ssh(True)
+        agentd.m_set_ssh(True, self.GOOD)
+        agentd.m_set_ssh(False)
+        self.assertFalse(config.load_for_agent()["ssh"]["enabled"])
+        agentd.m_set_ssh(True)           # le mot de passe déjà défini est conservé
+        self.assertTrue(config.load_for_agent()["ssh"]["enabled"])
+
+    def test_refuses_root_and_system_accounts(self):
+        for acct in (_account(uid=0), _account(uid=105, shell="/usr/sbin/nologin"), _account(uid=1001, shell="/bin/false")):
+            self.account = acct
+            with self.subTest(f"uid {acct.pw_uid} {acct.pw_shell}"), self.assertRaises(ValueError):
+                agentd.m_set_ssh(True, self.GOOD)
+        self.assertFalse(any(cmd == ["chpasswd"] for cmd, _ in self.runs))
+
+    def test_unknown_user(self):
+        self.account = None
+        with self.assertRaisesRegex(ValueError, "n'existe pas"):
+            agentd.m_set_ssh(True, self.GOOD)
+
+    def test_chpasswd_failure_is_reported_and_not_recorded(self):
+        self.chpasswd_rc = 1
+        with self.assertRaises(RuntimeError):
+            agentd.m_set_ssh(True, self.GOOD)
+        self.assertFalse(config.load_for_agent()["ssh"]["password_set"])
+
+
+class AgentSshSyncTests(unittest.TestCase):
+    def setUp(self):
+        self.active = False
+        self.start_ok = True
+        self.calls = []
+        agent._ssh_failed_at = 0.0
+
+        def fake_run(cmd, timeout=20, check=False, input_text=None):
+            self.calls.append(cmd)
+            if cmd[:3] == ["systemctl", "is-active", "--quiet"]:
+                return mock.Mock(returncode=0 if self.active else 3)
+            if cmd[:2] == ["systemctl", "start"]:
+                return mock.Mock(returncode=0 if self.start_ok else 1)
+            return mock.Mock(returncode=0)
+
+        p = mock.patch.object(agent.system, "run", fake_run)
+        p.start()
+        self.addCleanup(p.stop)
+        self.cfg = config.sanitize(config.DEFAULTS)
+
+    def test_starts_ssh_after_stopping_the_socket(self):
+        self.cfg["ssh"]["enabled"] = True
+        self.assertTrue(agent._sync_ssh(self.cfg))
+        self.assertLess(self.calls.index(["systemctl", "stop", "ssh.socket"]), self.calls.index(["systemctl", "start", "ssh"]))
+
+    def test_stops_ssh_when_disabled(self):
+        self.active = True
+        self.assertFalse(agent._sync_ssh(self.cfg))
+        self.assertIn(["systemctl", "stop", "ssh.socket", "ssh"], self.calls)
+
+    def test_nothing_to_do_when_already_in_the_right_state(self):
+        self.assertFalse(agent._sync_ssh(self.cfg))
+        self.active, self.cfg["ssh"]["enabled"] = True, True
+        self.assertTrue(agent._sync_ssh(self.cfg))
+        self.assertFalse(any(c[:2] in (["systemctl", "start"], ["systemctl", "stop"]) for c in self.calls))
+
+    def test_failed_start_is_not_retried_every_tick(self):
+        self.cfg["ssh"]["enabled"], self.start_ok = True, False
+        with self.assertLogs("erouter.agent", "ERROR"):
+            self.assertFalse(agent._sync_ssh(self.cfg))
+        self.calls.clear()
+        agent._sync_ssh(self.cfg)
+        self.assertNotIn(["systemctl", "start", "ssh"], self.calls)
+
+
 class AgentBaseTests(unittest.TestCase):
     def test_failed_apply_is_retried_later_not_every_tick(self):
         cfg = config.sanitize(config.DEFAULTS)
@@ -389,6 +527,14 @@ class WebTests(unittest.TestCase):
         cls.sock = os.path.join(_TMP, "agent.sock")
         cls.calls = []
 
+        def fake_set_ssh(enabled, password=None):
+            cls.calls.append(("ssh", enabled, password))
+            if enabled and not password:
+                raise ValueError("Définis d'abord un mot de passe SSH")
+            return {"enabled": enabled, "password_set": True, "user": "pi"}
+
+        cls._fake_set_ssh = staticmethod(fake_set_ssh)
+
         def m_connect(ssid, password=None, hidden=False):
             cls.calls.append(("connect", ssid))
             if ssid == "boom":
@@ -400,10 +546,13 @@ class WebTests(unittest.TestCase):
             "status": lambda: {"uplink": {"connected": True, "internet": True},
                                "ap": {"enabled": True, "channel": 6, "active": True}, "warnings": [],
                                "fs": {"available": True, "enabled": True, "locked": True, "rescue": False, "data": "ok"},
-                               "tls": {"enabled": True, "ready": True, "fingerprint": "AA:BB"}, "clients": 3, "uptime": 99},
+                               "tls": {"enabled": True, "ready": True, "fingerprint": "AA:BB"},
+                               "ssh": {"enabled": False, "active": False, "user": "pi", "password_set": False},
+                               "clients": 3, "uptime": 99},
             "scan": lambda rescan=False: {"networks": [], "saved": []},
             "connect": m_connect,
             "forget": lambda ssid: True,
+            "set_ssh": cls._fake_set_ssh,
             "clients": lambda: [],
             "reboot": lambda: True,
         })
@@ -553,6 +702,21 @@ class WebTests(unittest.TestCase):
         before = config.load()["web"]["password_hash"]
         self.c.post("/api/settings", json={"web": {"password_hash": "x"}, "ap": {"ssid": "A"}})
         self.assertEqual(config.load()["web"]["password_hash"], before)
+
+    def test_ssh_toggle_goes_through_the_agent(self):
+        self.assertEqual(self.c.post("/api/ssh", json={"enabled": True, "password": "x" * 12}).status_code, 401)
+        self.login()
+        r = self.c.post("/api/ssh", json={"enabled": True, "password": "Une-phrase-secrete-42"})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn(("ssh", True, "Une-phrase-secrete-42"), self.calls)
+        err = self.c.post("/api/ssh", json={"enabled": True})
+        self.assertEqual(err.status_code, 400)
+        self.assertIn("mot de passe", err.get_json()["error"])
+        self.assertEqual(self.c.post("/api/ssh", json={"enabled": True, "password": 12345678901234}).status_code, 400)
+
+    def test_status_exposes_ssh_state(self):
+        self.login()
+        self.assertEqual(self.c.get("/api/status").get_json()["ssh"]["user"], "pi")
 
     def test_wifi_errors_are_reported(self):
         self.login()

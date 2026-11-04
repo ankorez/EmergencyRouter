@@ -34,6 +34,11 @@ DEFAULTS = {
     "uplink": {
         "interface": "wlan0",
     },
+    "ssh": {
+        "enabled": False,              # éteint par défaut ; s'active depuis l'interface (réseau du routeur uniquement)
+        "user": "pi",                  # compte existant (uid >= 1000) dont on règle le mot de passe
+        "password_set": False,
+    },
     "web": {
         "port": 443,                   # HTTPS
         "http_port": 80,               # redirige vers HTTPS (0 = désactivé)
@@ -44,6 +49,7 @@ DEFAULTS = {
 }
 
 _IFACE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}$")   # jamais de « - » en tête : pas pris pour une option
+_USER = re.compile(r"^[a-z_][a-z0-9_-]{0,30}$")
 _LEASE = re.compile(r"^\d{1,5}[smhd]?$")
 _COUNTRY = re.compile(r"^[A-Z]{2}$")
 
@@ -71,7 +77,7 @@ def validate(cfg):
 
 
 def _validate(cfg):
-    lan, ap, up, web = cfg["lan"], cfg["ap"], cfg["uplink"], cfg["web"]
+    lan, ap, up, web, ssh = cfg["lan"], cfg["ap"], cfg["uplink"], cfg["web"], cfg["ssh"]
 
     iface = ipaddress.IPv4Interface(lan["address"])
     net = iface.network
@@ -91,6 +97,11 @@ def _validate(cfg):
         raise ValueError("Nom d'interface LAN invalide")
     if not _IFACE.fullmatch(up["interface"]):
         raise ValueError("Nom d'interface uplink invalide")
+
+    if not isinstance(ssh["enabled"], bool) or not isinstance(ssh["password_set"], bool):
+        raise ValueError("Réglages SSH invalides")
+    if not isinstance(ssh["user"], str) or not _USER.fullmatch(ssh["user"]):
+        raise ValueError("Nom d'utilisateur SSH invalide")
 
     ssid, pw = ap["ssid"], ap["password"]
     if not isinstance(ssid, str) or not 1 <= len(ssid.encode()) <= 32 \

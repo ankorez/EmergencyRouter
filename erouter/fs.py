@@ -10,6 +10,7 @@ Sortie de secours : ajouter `erouter.unlock` à la fin de cmdline.txt (partition
 
 Ligne de commande :  sudo erouter-fs status | lock | unlock
 """
+import contextlib
 import logging
 import os
 import sys
@@ -83,6 +84,22 @@ def _try_lock(retries=5):
             return True
         time.sleep(1)
     return False
+
+
+@contextlib.contextmanager
+def writable():
+    """Repasse brièvement le système en écriture (ex. changer un mot de passe), puis le reverrouille.
+    Sans effet si le système n'est pas verrouillé. Le verrou interne empêche tout reverrouillage pendant la fenêtre."""
+    with _lock:
+        was_ro = root_ro()
+        if was_ro and not _remount("rw"):
+            raise RuntimeError("Impossible de passer le système en écriture")
+        try:
+            yield
+        finally:
+            system.run(["sync"])
+            if was_ro and not _try_lock():
+                log.warning("Reverrouillage impossible pour l'instant : nouvel essai automatique")
 
 
 def maintain():

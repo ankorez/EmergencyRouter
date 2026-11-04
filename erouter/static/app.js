@@ -45,6 +45,24 @@ $("#loginForm").onsubmit = async e => {
 };
 $("#logoutBtn").onclick = async () => { await api("/api/logout", {}); boot(); };
 
+let sshFormReady = false;
+function renderSsh(x) {
+  if (!x) return;
+  $("#sshDot").className = "dot " + (x.active ? "ok" : x.enabled ? "bad" : "");
+  $("#sshTitle").textContent = x.active ? "Activé" : x.enabled ? "Arrêté" : "Désactivé";
+  $("#sshSub").textContent = x.active ? `Utilisateur ${x.user}` : "";
+  $("#sshHelp").textContent = `Joignable uniquement depuis le hotspot ou le câble Ethernet du routeur : ssh ${x.user}@192.168.1.1. ` +
+    "Changer le mot de passe écrit brièvement sur la carte (une seconde).";
+  $("#sshPw").placeholder = x.password_set ? "Laisser vide pour ne pas le changer" : "Choisis un mot de passe (12 caractères min.)";
+  if (!sshFormReady) { $("#sshUser").value = x.user; $("#sshOn").checked = x.enabled; sshFormReady = true; }
+}
+$("#sshForm").onsubmit = async e => {
+  e.preventDefault();
+  try {
+    const r = await api("/api/ssh", {enabled: $("#sshOn").checked, password: $("#sshPw").value});
+    $("#sshPw").value = ""; toast(r.enabled ? "SSH activé" : "SSH désactivé"); setTimeout(refresh, 3000);
+  } catch (err) { toast(err.message); }
+};
 function renderBuild(b) {
   if (!b) return;
   const parts = ["EmergencyRouter " + b.version];
@@ -72,6 +90,7 @@ async function refresh() {
   $("#apSub").textContent = a.enabled ? a.ssid : "";
   $("#apKv").innerHTML = kv([["Canal", a.channel], ["Routeur", s.lan.address], ["Appareils", s.lan.clients], ["Uptime", fmtUp(s.uptime)]]);
   const w = $("#warnings"); w.hidden = !s.warnings.length; w.innerHTML = s.warnings.map(esc).join("<br>");
+  renderSsh(s.ssh);
   renderBuild(s.build);
   renderTls(s.tls);
   const c = await api("/api/clients");
